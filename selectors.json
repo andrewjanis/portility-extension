@@ -1,0 +1,39 @@
+{
+    "claude": {
+          "human": [
+                  "[data-testid=\"user-message\"]",
+                  "[data-testid=\"human-turn\"]",
+                  "[class*=\"human-turn\"]",
+                  "[class*=\"HumanTurn\"]"
+          ],
+          "ai_class_fragment": "font-claude-response",
+          "input": "div.ProseMirror[contenteditable=\"true\"]",
+          "send_button": [
+                  "button[aria-label=\"Send Message\"]",
+                  "button[aria-label=\"Send message\"]",
+                  "fieldset button[type=\"button\"]:last-child",
+                  "button[data-testid=\"send-button\"]"
+          ]
+    },
+    "chatgpt": {
+          "human": "[data-message-author-role=\"user\"]",
+          "ai": "[data-message-author-role=\"assistant\"]",
+          "input": "#prompt-textarea",
+          "send_button": [
+                  "button[data-testid=\"send-button\"]",
+                  "button[aria-label=\"Send prompt\"]",
+                  "button[aria-label=\"Send\"]"
+          ]
+    },
+    "gemini": {
+          "human": [".user-query-text", "[data-turn-role=\"user\"]", ".query-text", "user-query"],
+          "ai": [".model-response-text", "[data-turn-role=\"model\"]", ".response-text", "model-response"],
+          "input": ".ql-editor[contenteditable=\"true\"]",
+          "send_button": [
+                  "button.send-button",
+                  "button[aria-label=\"Send message\"]",
+                  "button[aria-label=\"Send Message\"]",
+                  ".input-area button[mat-icon-button]"
+          ]
+    }
+}
