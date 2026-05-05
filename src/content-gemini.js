@@ -17,22 +17,31 @@
   const { isElementVisible, extractElementText, copyToClipboard, formatConversation } =
     window.PortilityShared;
 
-  // ─── Selectors ────────────────────────────────────────────────────────────
+  // ─── Selectors (defaults, overridden by dynamic config from GitHub) ──────
   // Gemini's DOM uses multiple possible selectors; try them in order of
   // specificity. These cover known Gemini UI variations.
-  const HUMAN_SELECTORS = [
+  let HUMAN_SELECTORS = [
     '.user-query-text',
     '[data-turn-role="user"]',
     '.query-text',
     'user-query',
   ];
 
-  const AI_SELECTORS = [
+  let AI_SELECTORS = [
     '.model-response-text',
     '[data-turn-role="model"]',
     '.response-text',
     'model-response',
   ];
+
+  // Load dynamic selectors from chrome.storage.local (cached by background.js)
+  chrome.storage.local.get('portility_selectors', function (data) {
+    if (data.portility_selectors && data.portility_selectors.gemini) {
+      var cfg = data.portility_selectors.gemini;
+      if (cfg.human && Array.isArray(cfg.human)) HUMAN_SELECTORS = cfg.human;
+      if (cfg.ai && Array.isArray(cfg.ai)) AI_SELECTORS = cfg.ai;
+    }
+  });
 
   // ─── Conversation scope ───────────────────────────────────────────────────
   /**

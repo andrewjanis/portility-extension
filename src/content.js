@@ -25,8 +25,8 @@
   const { isElementVisible, extractElementText, stripMarkdown, copyToClipboard, formatConversation } =
     window.PortilityShared;
 
-  // ─── Selectors ────────────────────────────────────────────────────────────
-  const HUMAN_SELECTORS = [
+  // ─── Selectors (defaults, overridden by dynamic config from GitHub) ──────
+  let HUMAN_SELECTORS = [
     '[data-testid="user-message"]',
     '[data-testid="human-turn"]',
     '[class*="human-turn"]',
@@ -35,7 +35,16 @@
 
   // The class used on Claude's AI response containers.
   // We filter querySelectorAll results to outermost matches only (BUG-005).
-  const AI_CLASS_FRAGMENT = 'font-claude-response';
+  let AI_CLASS_FRAGMENT = 'font-claude-response';
+
+  // Load dynamic selectors from chrome.storage.local (cached by background.js)
+  chrome.storage.local.get('portility_selectors', function (data) {
+    if (data.portility_selectors && data.portility_selectors.claude) {
+      var cfg = data.portility_selectors.claude;
+      if (cfg.human && Array.isArray(cfg.human)) HUMAN_SELECTORS = cfg.human;
+      if (cfg.ai_class_fragment) AI_CLASS_FRAGMENT = cfg.ai_class_fragment;
+    }
+  });
 
   // ─── Conversation scope (BUG-004, BUG-001) ────────────────────────────────
   /**

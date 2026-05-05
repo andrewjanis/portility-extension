@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Portility Settings</title>
+  <link rel="stylesheet" href="styles/options.css" />
+</head>
+<body>
+  <h1>Portility Settings</h1>
+
+  <!-- Google Drive Section -->
+  <div class="section">
+    <div class="section-title">Google Drive</div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">
+          <span class="status-dot" id="driveStatusDot"></span>
+          <span id="driveStatusText">Checking...</span>
+        </div>
+        <div class="setting-description">Files are stored in your PortMyChat-Temp folder</div>
+      </div>
+      <button id="driveAuthBtn" class="btn-primary">Connect</button>
+    </div>
+  </div>
+
+  <!-- Selector Config Section -->
+  <div class="section">
+    <div class="section-title">Platform Selectors</div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Force Refresh Selectors</div>
+        <div class="setting-description" id="selectorCacheInfo">Pull latest selectors from GitHub</div>
+      </div>
+      <button id="refreshSelectorsBtn" class="btn-secondary">Refresh</button>
+    </div>
+  </div>
+
+  <!-- Help Section -->
+  <div class="section">
+    <div class="section-title">Help</div>
+    <div class="setting-row">
+      <div class="setting-label">Portility Docs & Instructions</div>
+      <button class="btn-link" id="docsLink">Open</button>
+    </div>
+  </div>
+
+  <!-- Account Section -->
+  <div class="section">
+    <div class="section-title">Account</div>
+    <div class="setting-row">
+      <div class="setting-label">Log out of Portility</div>
+      <button id="logoutBtn" class="btn-danger">Log Out</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="options.js"></script>
+</body>
+</html>

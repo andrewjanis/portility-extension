@@ -224,6 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const bugBtn = document.getElementById('bugBtn');
   const featureBtn = document.getElementById('featureBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
   const bugStatusEl = document.getElementById('bugStatus');
 
   const destBtns = [claudeDestBtn, geminiDestBtn, chatgptDestBtn, saveDestBtn];
@@ -1529,5 +1530,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── Feature request ──────────────────────────────────────────────────────
   featureBtn.addEventListener('click', () => {
     chrome.tabs.create({ url: FEATURE_REQUEST_URL });
+  });
+
+  // ─── Settings ────────────────────────────────────────────────────────────
+  settingsBtn.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
   });
 });

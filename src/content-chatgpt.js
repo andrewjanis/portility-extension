@@ -18,9 +18,18 @@
   const { isElementVisible, extractElementText, copyToClipboard, formatConversation } =
     window.PortilityShared;
 
-  // ─── Selectors ────────────────────────────────────────────────────────────
-  const HUMAN_SELECTOR = '[data-message-author-role="user"]';
-  const AI_SELECTOR = '[data-message-author-role="assistant"]';
+  // ─── Selectors (defaults, overridden by dynamic config from GitHub) ──────
+  let HUMAN_SELECTOR = '[data-message-author-role="user"]';
+  let AI_SELECTOR = '[data-message-author-role="assistant"]';
+
+  // Load dynamic selectors from chrome.storage.local (cached by background.js)
+  chrome.storage.local.get('portility_selectors', function (data) {
+    if (data.portility_selectors && data.portility_selectors.chatgpt) {
+      var cfg = data.portility_selectors.chatgpt;
+      if (cfg.human && typeof cfg.human === 'string') HUMAN_SELECTOR = cfg.human;
+      if (cfg.ai && typeof cfg.ai === 'string') AI_SELECTOR = cfg.ai;
+    }
+  });
 
   // ─── Conversation scope ───────────────────────────────────────────────────
   /**

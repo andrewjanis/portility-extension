@@ -26,6 +26,9 @@
 
 'use strict';
 
+// ─── Module imports ──────────────────────────────────────────────────────────
+importScripts('config.js', 'selector-manager.js', 'artifact-curator.js', 'gdrive.js');
+
 // ─── Icon sets ────────────────────────────────────────────────────────────────
 const ICONS = {
   active: {
@@ -162,6 +165,139 @@ chrome.runtime.onMessage.addListener(function (message, sender) {
     return;
   }
 });
+
+// ─── v1.5 Message handlers ───────────────────────────────────────────────────
+chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+  if (message.type === 'FORCE_REFRESH_SELECTORS') {
+    fetchAndCacheSelectors()
+      .then(function () { sendResponse({ success: true }); })
+      .catch(function (err) { sendResponse({ success: false, error: err.message }); });
+    return true; // Keep channel open for async
+  }
+
+  if (message.type === 'START_GDRIVE_AUTH') {
+    startDriveAuth()
+      .then(function () { sendResponse({ success: true }); })
+      .catch(function (err) { sendResponse({ success: false, error: err.message }); });
+    return true;
+  }
+
+  if (message.type === 'ARTIFACT_DETECTED') {
+    handleArtifactDetected(message.payload);
+    return;
+  }
+});
+
+/**
+ * Handle a detected artifact upload from content script.
+ */
+async function handleArtifactDetected(artifact) {
+  try {
+    var tag = tagArtifact(artifact.name);
+
+    var stored = await chrome.storage.local.get(['portility_artifacts']);
+    var artifacts = stored.portility_artifacts || {};
+
+    // Version pruning — mark older versions as superseded
+    var toSupersede = pruneOldVersions(artifact.name, artifacts);
+    for (var i = 0; i < toSupersede.length; i++) {
+      var old = toSupersede[i];
+      if (artifacts[old.name]) {
+        artifacts[old.name].status = 'superseded';
+        artifacts[old.name].supersededBy = artifact.name;
+      }
+      // Delete from Drive if uploaded
+      if (old.driveId) {
+        deleteDriveFile(old.driveId);
+      }
+    }
+
+    // Store new artifact metadata
+    artifacts[artifact.name] = {
+      name: artifact.name,
+      fileType: artifact.fileType,
+      size: artifact.size,
+      platform: artifact.platform,
+      timestamp: artifact.timestamp,
+      conversationUrl: artifact.conversationUrl || null,
+      tag: tag.tag,
+      tagReason: tag.reason,
+      driveId: null,
+      driveLink: null,
+      status: 'pending'
+    };
+
+    await chrome.storage.local.set({ portility_artifacts: artifacts });
+
+    // Upload to Drive if authenticated and tagged as keeper
+    var authenticated = await isDriveAuthenticated();
+    if (authenticated && tag.tag === 'keeper') {
+      uploadArtifactToDrive(artifact);
+    }
+  } catch (err) {
+    console.warn('[Portility] handleArtifactDetected error:', err.message);
+  }
+}
+
+/**
+ * Request file blob from content script and upload to Drive.
+ */
+async function uploadArtifactToDrive(artifact) {
+  try {
+    var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0]) return;
+
+    chrome.tabs.sendMessage(tabs[0].id, {
+      type: 'GET_FILE_BLOB',
+      filename: artifact.name
+    }, async function (response) {
+      if (!response || !response.blob) {
+        console.warn('[Portility] No blob available for ' + artifact.name);
+        return;
+      }
+
+      // Convert base64 data URL back to Blob
+      var byteString = atob(response.blob.split(',')[1]);
+      var mimeType = response.type || 'application/octet-stream';
+      var ab = new ArrayBuffer(byteString.length);
+      var ia = new Uint8Array(ab);
+      for (var i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      var fileBlob = new Blob([ab], { type: mimeType });
+
+      var result = await uploadFileToDrive(artifact.name, fileBlob);
+
+      // Update stored metadata with Drive info
+      var stored = await chrome.storage.local.get(['portility_artifacts']);
+      var artifacts = stored.portility_artifacts || {};
+      if (artifacts[artifact.name]) {
+        artifacts[artifact.name].driveId = result.driveId;
+        artifacts[artifact.name].driveLink = result.driveLink;
+        artifacts[artifact.name].status = 'uploaded';
+      }
+      await chrome.storage.local.set({ portility_artifacts: artifacts });
+
+      console.log('[Portility] Uploaded to Drive: ' + artifact.name + ' → ' + result.driveLink);
+    });
+  } catch (err) {
+    console.error('[Portility] Drive upload failed for ' + artifact.name + ':', err.message);
+  }
+}
+
+// ─── Selector refresh alarm ──────────────────────────────────────────────────
+chrome.alarms.create('refreshSelectors', { periodInMinutes: 360 }); // 6 hours
+
+chrome.alarms.onAlarm.addListener(function (alarm) {
+  if (alarm.name === 'refreshSelectors') {
+    fetchAndCacheSelectors().catch(function (err) {
+      console.warn('[Portility] Alarm selector refresh failed:', err.message);
+    });
+  }
+});
+
+// ─── Init on startup ─────────────────────────────────────────────────────────
+initSelectorManager();
 
 // ─── Toolbar click ────────────────────────────────────────────────────────────
 // Extraction is now triggered from popup.js — the popup owns the click action.
