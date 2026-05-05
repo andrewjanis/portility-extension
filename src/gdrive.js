@@ -4,7 +4,7 @@
 
 'use strict';
 
-var GDRIVE_OAUTH_CLIENT_ID = '542250387353-gphorccrtp7gmmt92eig8c586ivp9oed.apps.googleusercontent.com';
+var GDRIVE_OAUTH_CLIENT_ID = '542250387353-k1uu29l3844ct0404i83nboe011btbvc.apps.googleusercontent.com';
 var GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 var GDRIVE_FOLDER_NAME = 'PortMyChat-Temp';
 
@@ -64,7 +64,7 @@ async function exchangeDriveCode(code) {
   var response = await fetch(GDRIVE_TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: code, redirect_uri: redirectUrl })
+    body: JSON.stringify({ code: code, redirect_uri: redirectUrl, client_id: GDRIVE_OAUTH_CLIENT_ID })
   });
 
   if (!response.ok) {
@@ -124,7 +124,7 @@ async function getDriveAccessToken() {
   var response = await fetch(GDRIVE_REFRESH_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: stored.gdrive_refresh_token })
+    body: JSON.stringify({ refresh_token: stored.gdrive_refresh_token, client_id: GDRIVE_OAUTH_CLIENT_ID })
   });
 
   if (!response.ok) {

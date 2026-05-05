@@ -6,10 +6,13 @@
  *   POST /moderate      — forwards to OpenAI Moderation API
  *   POST /summarize     — forwards to Anthropic Claude API (Haiku, basic summary)
  *   POST /summarize-pro — forwards to Anthropic Claude API (Sonnet, project brief + asset catalog)
+ *   POST /gdrive/token  — exchanges Google OAuth auth code for tokens
+ *   POST /gdrive/refresh — refreshes an expired Google Drive access token
  *
  * Environment variables (set as secrets in Cloudflare dashboard):
- *   OPENAI_API_KEY   — your OpenAI API key
- *   ANTHROPIC_API_KEY — your Anthropic API key
+ *   OPENAI_API_KEY       — your OpenAI API key
+ *   ANTHROPIC_API_KEY    — your Anthropic API key
+ *   GOOGLE_CLIENT_SECRET — Google OAuth client secret for Drive integration
  */
 
 export default {
@@ -44,6 +47,10 @@ export default {
         return await handleSecondOpinion(request, env, corsHeaders);
       } else if (path === '/compare') {
         return await handleCompare(request, env, corsHeaders);
+      } else if (path === '/gdrive/token') {
+        return await handleDriveToken(request, env, corsHeaders);
+      } else if (path === '/gdrive/refresh') {
+        return await handleDriveRefresh(request, env, corsHeaders);
       } else {
         return new Response('Not found', { status: 404, headers: corsHeaders });
       }
@@ -369,6 +376,89 @@ async function handleCompare(request, env, corsHeaders) {
   }
 
   return new Response(JSON.stringify(parsed), {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
+// ─── Google Drive OAuth Token Exchange ────────────────────────────────────────
+
+async function handleDriveToken(request, env, corsHeaders) {
+  var body = await request.json();
+  var code = body.code;
+  var redirectUri = body.redirect_uri;
+
+  if (!code || !redirectUri) {
+    return new Response(JSON.stringify({ error: 'code and redirect_uri are required' }), {
+      status: 400,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: '542250387353-k1uu29l3844ct0404i83nboe011btbvc.apps.googleusercontent.com',
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      code: code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  var data = await response.json();
+
+  if (data.error) {
+    return new Response(JSON.stringify({ error: data.error_description || data.error }), {
+      status: 400,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  return new Response(JSON.stringify({
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_in: data.expires_in,
+  }), {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
+async function handleDriveRefresh(request, env, corsHeaders) {
+  var body = await request.json();
+  var refreshToken = body.refresh_token;
+
+  if (!refreshToken) {
+    return new Response(JSON.stringify({ error: 'refresh_token is required' }), {
+      status: 400,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: '542250387353-k1uu29l3844ct0404i83nboe011btbvc.apps.googleusercontent.com',
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  var data = await response.json();
+
+  if (data.error) {
+    return new Response(JSON.stringify({ error: data.error_description || data.error }), {
+      status: 400,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  return new Response(JSON.stringify({
+    access_token: data.access_token,
+    expires_in: data.expires_in,
+  }), {
     headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
   });
 }
