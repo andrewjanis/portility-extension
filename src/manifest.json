@@ -42,12 +42,12 @@
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["posthog.js", "port-my-chat-prompts.js", "content-shared.js", "content-chatgpt.js"],
+      "js": ["posthog.js", "port-my-chat-prompts.js", "content-shared.js", "upload-listener.js", "content-chatgpt.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["posthog.js", "port-my-chat-prompts.js", "content-shared.js", "content-gemini.js"],
+      "js": ["posthog.js", "port-my-chat-prompts.js", "content-shared.js", "upload-listener.js", "content-gemini.js"],
       "run_at": "document_idle"
     }
   ],
