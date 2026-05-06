@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "WebSearch",
+      "WebFetch(domain:posthog.com)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(rm:*)",
+      "Bash(du:*)",
+      "Bash(unzip:*)",
+      "Bash(file *:*)",
+      "Bash(find .:*)",
+      "Bash(ls:*)",
+      "Bash(powershell:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(bash:*)",
+      "Bash(zip:*)",
+      "Bash(xxd:*)",
+      "Bash(cp:*)",
+      "Bash(where:*)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(xargs grep:*)",
+      "WebFetch(domain:app.posthog.com)",
+      "Bash(git ls-remote:*)",
+      "Bash(git config:*)"
+    ]
+  }
+}

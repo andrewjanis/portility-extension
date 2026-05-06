@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Portility AI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background-color: #ffffff;
+            color: #333333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0 30px 0;
+            border-bottom: 2px solid #00BCD4;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 600;
+            color: #00BCD4;
+        }
+
+        .logo span {
+            color: #7B1FA2;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: #999999;
+            margin-top: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 32px 0 16px 0;
+            padding-top: 16px;
+        }
+
+        h1:first-of-type {
+            margin-top: 0;
+            padding-top: 0;
+        }
+
+        p {
+            margin-bottom: 16px;
+            font-size: 15px;
+        }
+
+        ul {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+
+        strong {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .contact-info {
+            background-color: #f5f5f5;
+            padding: 16px;
+            border-left: 4px solid #00BCD4;
+            margin-top: 32px;
+            border-radius: 4px;
+        }
+
+        .contact-info p {
+            margin-bottom: 0;
+        }
+
+        a {
+            color: #00BCD4;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        footer {
+            margin-top: 48px;
+            padding-top: 24px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            font-size: 13px;
+            color: #999999;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 16px;
+            }
+
+            header {
+                padding: 30px 0 20px 0;
+                margin-bottom: 30px;
+            }
+
+            .logo {
+                font-size: 24px;
+            }
+
+            h1 {
+                font-size: 20px;
+                margin-top: 24px;
+            }
+
+            p, li {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Portility <span>AI</span></div>
+            <div class="subtitle">Privacy Policy</div>
+        </header>
+
+        <main>
+            <h1>What this extension does</h1>
+            <p><strong>Portility AI</strong> is a Chrome browser extension that extracts conversations from AI chatbots like Claude, ChatGPT, and Gemini, and lets you port them to another platform or save them locally. The "Summarize" option transmits conversation content to Portility's servers for summary generation, which is then returned and copied to your clipboard.</p>
+
+            <h1>Content safety check</h1>
+            <p>Before any conversation is copied or summarized, the extension transmits the conversation text to a third-party content moderation service (OpenAI Moderation API) to check for harmful or prohibited content. This check applies to both the Copy Conversation and Summarize options. The moderation service does not store the content after processing.</p>
+
+            <h1>What data we collect</h1>
+            <p><strong>Copy Conversation option:</strong> Conversation content is transmitted to a third-party moderation service for a content safety check, then copied directly to your clipboard. Portility does not store the conversation content. No conversation content is retained by Portility or the moderation provider after the check is complete.</p>
+
+            <p><strong>Summarize option:</strong> Conversation content is first sent to a moderation service for a safety check, then transmitted to Portility's servers for summary generation. The company does not retain conversation content itself. Upon receipt, conversations are summarized, returned to the user, and immediately discarded.</p>
+
+            <p><strong>Save as .txt option:</strong> When saving to a file, conversation content is transmitted to the moderation service for a safety check. If the check passes, the file is generated locally on your device. Portility does not receive or store the content.</p>
+
+            <h1>Analytics</h1>
+            <p>The extension collects anonymous usage analytics through PostHog, a third-party analytics service. This includes:</p>
+            <ul>
+                <li>Feature usage events (which buttons are clicked, success or failure of operations)</li>
+                <li>Message counts and error occurrences</li>
+                <li>General device information (browser type, screen resolution, language)</li>
+                <li>An anonymous identifier stored locally in your browser to distinguish unique installations</li>
+            </ul>
+            <p>This data contains no conversation content and no personally identifiable information such as names, email addresses, or account details. Analytics data is used solely to evaluate product performance and improve the extension over time. It is not used for advertising or profiling purposes.</p>
+            <p>The extension does not use cookies or tracking pixels.</p>
+
+            <h1>How your data is used</h1>
+            <p>Anonymous analytics data serves solely to evaluate product performance and improve the extension over time. It is not used for advertising or profiling purposes. Conversation content is never stored by Portility.</p>
+
+            <h1>Third parties</h1>
+            <p>The extension uses the following third-party services:</p>
+            <ul>
+                <li><strong>OpenAI</strong> — Content moderation. Conversation text is sent to the OpenAI Moderation API for safety screening. OpenAI's privacy policy applies to this processing. Content is not retained by OpenAI after the moderation check.</li>
+                <li><strong>Anthropic</strong> — Summarization. The Summarize feature uses the Anthropic API to generate conversation summaries. Anthropic's privacy policy applies to API-processed content.</li>
+                <li><strong>PostHog</strong> — Analytics. Anonymous usage events are sent to PostHog for product analytics. No conversation content or personally identifiable information is included.</li>
+            </ul>
+            <p>No data is shared with any other third parties.</p>
+
+            <h1>Children</h1>
+            <p>This extension is not directed at children under 13, and the company does not knowingly collect information from children.</p>
+
+            <h1>Changes to this policy</h1>
+            <p>Material changes to data handling practices will be reflected on this page with date updates.</p>
+
+            <h1>Contact</h1>
+            <div class="contact-info">
+                <p>For privacy-related inquiries, please reach out to: <strong><a href="mailto:privacy@portility.ai">privacy@portility.ai</a></strong></p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Last updated: April 2026</p>
+        </footer>
+    </div>
+</body>
+</html>

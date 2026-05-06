@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/questionnaire.css">
+  <link rel="stylesheet" href="styles/pro-review.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 220px;
+      height: 300px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #fff;
+      color: #111;
+      position: relative;
+    }
+
+    h1 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-bottom: 12px;
+      color: #111;
+    }
+
+    .btn-primary {
+      width: 100%;
+      padding: 10px 0;
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #4ADE80, #14B8A6, #0891B2) border-box;
+      color: #1F2937;
+      border: 2px solid transparent;
+      border-radius: 10px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: box-shadow 0.2s, transform 0.15s;
+      display: block;
+      position: relative;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(20, 184, 166, 0.15);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 4px 12px rgba(20, 184, 166, 0.25);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: 0 1px 4px rgba(20, 184, 166, 0.18);
+    }
+
+    .btn-primary:disabled {
+      background:
+        linear-gradient(#f9fafb, #f9fafb) padding-box,
+        linear-gradient(135deg, #d1d5db, #d1d5db) border-box;
+      color: #9ca3af;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .btn-primary .btn-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    #screen1 {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    #status {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 12px;
+      min-height: 16px;
+      line-height: 1.4;
+    }
+
+    #status.error { color: #dc2626; }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #f3f4f6;
+      margin: 16px 0 10px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 10px;
+      margin-top: auto;
+      justify-content: center;
+    }
+
+    .settings-gear {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      color: #9ca3af;
+      transition: color 0.2s;
+      line-height: 0;
+    }
+
+    .settings-gear:hover { color: #6b7280; }
+
+    .link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 11px;
+      color: #9ca3af;
+      cursor: pointer;
+      text-decoration: underline;
+      font-family: inherit;
+    }
+
+    .link-btn:hover { color: #6b7280; }
+
+    .link-btn:disabled {
+      color: #d1d5db;
+      cursor: default;
+    }
+
+    #bugStatus {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 6px;
+      min-height: 14px;
+      line-height: 1.4;
+    }
+
+    #bugStatus.sent { color: #16a34a; }
+
+    #screen2 { display: none; }
+
+    .back-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 11px;
+      color: #9ca3af;
+      cursor: pointer;
+      font-family: inherit;
+      margin-bottom: 12px;
+      display: inline-block;
+    }
+
+    .back-btn:hover { color: #6b7280; }
+
+    .screen2-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 10px;
+    }
+
+    .dest-btn {
+      width: 100%;
+      padding: 8px 0;
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #4ADE80, #14B8A6, #0891B2) border-box;
+      color: #1F2937;
+      border: 1.5px solid transparent;
+      border-radius: 10px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: box-shadow 0.2s, transform 0.15s;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 1px 4px rgba(20, 184, 166, 0.1);
+    }
+
+    .dest-btn svg { flex-shrink: 0; }
+
+    .dest-btn:hover:not(:disabled) {
+      box-shadow: 0 3px 10px rgba(20, 184, 166, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .dest-btn:disabled {
+      background:
+        linear-gradient(#f9fafb, #f9fafb) padding-box,
+        linear-gradient(135deg, #d1d5db, #d1d5db) border-box;
+      color: #9ca3af;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .instructions-checkbox-label {
+      font-size: 11px;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+      cursor: pointer;
+    }
+
+    .instructions-checkbox-label input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+
+    #screen2Status {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 8px;
+      min-height: 16px;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    #screen2Status.error { color: #dc2626; }
+
+    /* ── Moderation modal ─────────────────────────────────────── */
+    #moderationOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #moderationOverlay.visible {
+      display: flex;
+    }
+
+    #moderationModal {
+      background: #fff;
+      border-radius: 10px;
+      padding: 18px 16px;
+      width: 200px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+      text-align: center;
+    }
+
+    #moderationModal p {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
+    .modal-btn {
+      width: 100%;
+      padding: 8px 0;
+      border-radius: 10px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: box-shadow 0.2s, transform 0.15s;
+      display: block;
+    }
+
+    #modalOkayBtn {
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #4ADE80, #14B8A6, #0891B2) border-box;
+      color: #1F2937;
+      border: 2px solid transparent;
+      margin-bottom: 8px;
+      box-shadow: 0 2px 6px rgba(20, 184, 166, 0.15);
+    }
+
+    #modalOkayBtn:hover {
+      box-shadow: 0 4px 12px rgba(20, 184, 166, 0.25);
+      transform: translateY(-1px);
+    }
+
+    #modalErrorBtn {
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #d1d5db, #d1d5db) border-box;
+      color: #6b7280;
+      border: 1.5px solid transparent;
+    }
+
+    #modalErrorBtn:hover {
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #4ADE80, #14B8A6, #0891B2) border-box;
+      color: #1F2937;
+    }
+
+    #modalFeedbackArea {
+      display: none;
+      margin-top: 12px;
+    }
+
+    #modalFeedbackArea textarea {
+      width: 100%;
+      height: 60px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-family: inherit;
+      resize: none;
+      margin-bottom: 8px;
+      color: #111;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    #modalFeedbackArea textarea:focus {
+      outline: none;
+      border-color: #14B8A6;
+      box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.1);
+    }
+
+    #modalSubmitBtn {
+      width: 100%;
+      padding: 7px 0;
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(135deg, #4ADE80, #14B8A6, #0891B2) border-box;
+      color: #1F2937;
+      border: 2px solid transparent;
+      border-radius: 10px;
+      font-family: 'Nunito', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(20, 184, 166, 0.15);
+      transition: box-shadow 0.2s, transform 0.15s;
+    }
+
+    #modalSubmitBtn:hover {
+      box-shadow: 0 4px 12px rgba(20, 184, 166, 0.25);
+      transform: translateY(-1px);
+    }
+
+    #modalSubmitBtn:disabled {
+      background:
+        linear-gradient(#f9fafb, #f9fafb) padding-box,
+        linear-gradient(135deg, #d1d5db, #d1d5db) border-box;
+      color: #9ca3af;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    #modalThanks {
+      display: none;
+      font-size: 11px;
+      color: #16a34a;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       QUESTIONNAIRE (2 pages)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="questionnaire">
+
+    <!-- Page 1: dynamically rendered from questions-config.js -->
+    <div id="q-page1" class="q-screen">
+      <img src="icons/logo-horizontal.png" alt="Portility" style="width:90px;height:auto;margin-bottom:8px;">
+      <div class="q-subheading">Answer these questions to tell your AI how you want to be spoken with.</div>
+      <div id="q-page1-content"></div>
+      <button id="qPage1NextBtn" class="q-btn" style="margin-top:12px;">Next</button>
+    </div>
+
+    <!-- Page 2: dynamically rendered sections + destination + submit -->
+    <div id="q-page2" class="q-screen">
+      <img src="icons/logo-horizontal.png" alt="Portility" style="width:90px;height:auto;margin-bottom:12px;">
+      <div id="q-page2-content"></div>
+
+      <div class="q-section-title">Where are we sending?</div>
+      <div class="q-dest-chips">
+        <button class="q-option q-dest-chip" data-dest="claude"><svg width="14" height="14" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M233.96 800.21L468.64 668.54l3.95-11.44-3.95-6.36h-11.44l-39.22-2.42-134.09-3.62-116.3-4.83-112.67-6.04L26.58 627.79 0 592.75l2.74-17.48 23.84-16.03 34.15 2.98 75.46 5.15 113.23 7.81 82.15 4.83 121.69 12.65h19.33l2.74-7.81-6.6-4.83-5.16-4.83L346.39 495.79 219.54 411.87l-66.44-48.32-35.92-24.48-18.12-22.95-7.81-50.1 32.62-35.92 43.81 2.98 11.19 2.98 44.38 34.15 94.79 73.37 123.79 91.17 18.12 15.06 7.25-5.15.89-3.63-8.14-13.61-67.33-121.69L320.78 181.93l-31.97-51.3-8.46-30.77c-2.98-12.64-5.15-23.27-5.15-36.24L312.32 13.21l20.54-6.6 49.53 6.6 20.86 18.12 30.77 70.39 49.85 110.82 77.32 150.68 22.63 44.7 12.08 41.4 4.51 12.64h7.81v-7.25l6.36-84.89 11.76-104.21 11.44-134.09 3.95-37.77 18.68-45.26 37.13-24.48 28.83 13.85 23.84 34.15-3.3 22.07-14.17 92.13-27.79 144.32-18.12 96.64 10.55 0 12.08-12.08 48.89-64.91 82.15-102.68 36.24-40.75 42.28-45.02 27.14-21.42 51.3 0 37.77 56.13-16.91 58-52.83 67.01-43.81 56.78-62.82 84.56-39.22 67.65 3.62 5.4 9.34-.89 141.91-30.2 76.67-13.85 91.49-15.7 41.4 19.33 4.51 19.65-16.27 40.19-97.85 24.16-114.77 22.95-170.9 40.43-2.09 1.53 2.42 2.98 76.99 7.25 32.94 1.77 80.62 0 150.12 11.19 39.22 25.93 23.52 31.73-3.95 24.16-60.4 30.77-81.5-19.33-190.23-45.26-65.46-16.27-8.47 0v5.4l54.36 53.15 99.62 89.96 124.75 115.97 6.36 28.67-16.03 22.63-16.91-2.42-109.61-82.47-42.28-37.13-95.76-80.62-6.36 0v8.46l22.07 32.3 116.54 175.17 6.04 53.72-8.46 17.48-30.2 10.55-33.18-6.04-68.21-95.76-70.39-107.84-56.78-96.64-6.93 3.95-33.5 360.89-16.27 18.44-36.24 13.85-30.2-22.95-16.03-37.13 16.03-73.37 19.33-95.76 15.7-76.31 14.17-94.55 8.46-31.41-.56-2.09-6.93.89-71.23 97.85-108.4 146.5-85.77 91.81-20.54 8.14-35.6-18.44 3.3-32.94 19.89-29.35 118.71-150.12 71.6-93.58 46.23-47.74-.32-7.81-2.74 0L205.29 929.4l-56.13 7.25-24.16-22.63 2.98-37.13 11.44-12.08 94.79-65.23-.32.32z" fill="#d97757"/></svg> Claude</button>
+        <button class="q-option q-dest-chip" data-dest="gemini"><svg width="14" height="14" viewBox="0 0 65 65" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M32.447 0c.68 0 1.273.465 1.439 1.125a38.9 38.9 0 002 5.905c2.15 5 5.1 9.376 8.853 13.125 3.751 3.75 8.126 6.703 13.125 8.855a38.98 38.98 0 005.906 2c.66.165 1.124.757 1.124 1.437 0 .68-.464 1.273-1.125 1.44a38.9 38.9 0 00-5.905 1.998c-5 2.152-9.375 5.105-13.125 8.854-3.749 3.751-6.702 8.126-8.854 13.125a38.97 38.97 0 00-2 5.906 1.485 1.485 0 01-1.438 1.124c-.68 0-1.272-.464-1.438-1.125a38.9 38.9 0 00-2-5.905c-2.151-5-5.103-9.375-8.854-13.125-3.75-3.749-8.125-6.702-13.125-8.854a38.97 38.97 0 00-5.905-2A1.485 1.485 0 010 32.448c0-.68.465-1.272 1.125-1.438a38.9 38.9 0 005.905-2c5-2.151 9.376-5.104 13.125-8.854 3.75-3.749 6.703-8.125 8.855-13.125a38.97 38.97 0 002-5.905A1.485 1.485 0 0132.447 0z" fill="url(#gemiGradQ)"/><defs><linearGradient id="gemiGradQ" x1="18" y1="43" x2="52" y2="15" gradientUnits="userSpaceOnUse"><stop stop-color="#4285f4"/><stop offset="1" stop-color="#a374db"/></linearGradient></defs></svg> Gemini</button>
+        <button class="q-option q-dest-chip" data-dest="chatgpt"><svg width="14" height="14" viewBox="0 0 2406 2406" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><path d="M1 578.4C1 259.5 259.5 1 578.4 1h1249.1c319 0 577.5 258.5 577.5 577.4V2406H578.4C259.5 2406 1 2147.5 1 1828.6V578.4z" fill="#74aa9c"/><path id="qtb" d="M1107.3 299.1c-198 0-373.9 127.3-435.2 315.3L650 743.5v427.9c0 21.4 11 40.4 29.4 51.4l344.5 198.5V833.3h.1v-27.9L1372.7 604c33.7-19.5 70.4-32.9 108.5-39.8L1447.6 450.3C1361 353.5 1237.1 298.5 1107.3 299.1zm0 117.5-.6.6c79.7 0 156.3 27.5 217.6 78.4-2.5 1.2-7.4 4.3-11 6.1L952.8 709.3c-18.4 10.4-29.4 30-29.4 51.4V1248l-155.1-89.4V755.8c-.1-187.1 151.6-338.9 339-339.2z" fill="#fff"/><use xlink:href="#qtb" transform="rotate(60 1203 1203)"/><use xlink:href="#qtb" transform="rotate(120 1203 1203)"/><use xlink:href="#qtb" transform="rotate(180 1203 1203)"/><use xlink:href="#qtb" transform="rotate(240 1203 1203)"/><use xlink:href="#qtb" transform="rotate(300 1203 1203)"/></svg> ChatGPT</button>
+        <button class="q-option q-dest-chip" data-dest="save">Save as .txt</button>
+      </div>
+
+      <button id="qPortMeBtn" class="q-btn" style="margin-top:12px;">Port Me</button>
+      <div id="qPage2Error" class="q-error"></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       MAIN POPUP — Screen 1 (normal UI)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="screen1">
+    <img src="icons/logo-horizontal.png" alt="Portility" style="width:120px;height:auto;margin-bottom:20px;">
+
+    <button id="copyBtn" class="btn-primary"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat</button>
+    <button id="proChatBtn" class="btn-primary" style="margin-top:8px;display:none;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat Pro</button>
+    <button id="portInstructionsBtn" class="btn-primary" style="margin-top:12px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port Me</button>
+    <div id="status"></div>
+    <div id="portStatus"></div>
+
+    <div class="footer-links">
+      <button id="bugBtn" class="link-btn">Report a Bug</button>
+      <button id="featureBtn" class="link-btn">Request a Feature</button>
+      <button id="editInstructionsBtn" class="link-btn" style="display:none;">Edit Port Me Instructions</button>
+    </div>
+    <div id="bugStatus"></div>
+
+    <button id="settingsGearBtn" class="settings-gear" title="Settings">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.062 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"/></svg>
+    </button>
+  </div>
+
+  <!-- Screen 2 (destination picker) -->
+  <div id="screen2">
+    <button id="backBtn" class="back-btn">&larr; Back</button>
+    <p class="screen2-label" id="screen2Label">Port to&hellip;</p>
+
+    <button class="dest-btn" id="claudeDestBtn"><svg width="16" height="16" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M233.96 800.21L468.64 668.54l3.95-11.44-3.95-6.36h-11.44l-39.22-2.42-134.09-3.62-116.3-4.83-112.67-6.04L26.58 627.79 0 592.75l2.74-17.48 23.84-16.03 34.15 2.98 75.46 5.15 113.23 7.81 82.15 4.83 121.69 12.65h19.33l2.74-7.81-6.6-4.83-5.16-4.83L346.39 495.79 219.54 411.87l-66.44-48.32-35.92-24.48-18.12-22.95-7.81-50.1 32.62-35.92 43.81 2.98 11.19 2.98 44.38 34.15 94.79 73.37 123.79 91.17 18.12 15.06 7.25-5.15.89-3.63-8.14-13.61-67.33-121.69L320.78 181.93l-31.97-51.3-8.46-30.77c-2.98-12.64-5.15-23.27-5.15-36.24L312.32 13.21l20.54-6.6 49.53 6.6 20.86 18.12 30.77 70.39 49.85 110.82 77.32 150.68 22.63 44.7 12.08 41.4 4.51 12.64h7.81v-7.25l6.36-84.89 11.76-104.21 11.44-134.09 3.95-37.77 18.68-45.26 37.13-24.48 28.83 13.85 23.84 34.15-3.3 22.07-14.17 92.13-27.79 144.32-18.12 96.64 10.55 0 12.08-12.08 48.89-64.91 82.15-102.68 36.24-40.75 42.28-45.02 27.14-21.42 51.3 0 37.77 56.13-16.91 58-52.83 67.01-43.81 56.78-62.82 84.56-39.22 67.65 3.62 5.4 9.34-.89 141.91-30.2 76.67-13.85 91.49-15.7 41.4 19.33 4.51 19.65-16.27 40.19-97.85 24.16-114.77 22.95-170.9 40.43-2.09 1.53 2.42 2.98 76.99 7.25 32.94 1.77 80.62 0 150.12 11.19 39.22 25.93 23.52 31.73-3.95 24.16-60.4 30.77-81.5-19.33-190.23-45.26-65.46-16.27-8.47 0v5.4l54.36 53.15 99.62 89.96 124.75 115.97 6.36 28.67-16.03 22.63-16.91-2.42-109.61-82.47-42.28-37.13-95.76-80.62-6.36 0v8.46l22.07 32.3 116.54 175.17 6.04 53.72-8.46 17.48-30.2 10.55-33.18-6.04-68.21-95.76-70.39-107.84-56.78-96.64-6.93 3.95-33.5 360.89-16.27 18.44-36.24 13.85-30.2-22.95-16.03-37.13 16.03-73.37 19.33-95.76 15.7-76.31 14.17-94.55 8.46-31.41-.56-2.09-6.93.89-71.23 97.85-108.4 146.5-85.77 91.81-20.54 8.14-35.6-18.44 3.3-32.94 19.89-29.35 118.71-150.12 71.6-93.58 46.23-47.74-.32-7.81-2.74 0L205.29 929.4l-56.13 7.25-24.16-22.63 2.98-37.13 11.44-12.08 94.79-65.23-.32.32z" fill="#d97757"/></svg> Claude</button>
+    <button class="dest-btn" id="geminiDestBtn"><svg width="16" height="16" viewBox="0 0 65 65" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M32.447 0c.68 0 1.273.465 1.439 1.125a38.9 38.9 0 002 5.905c2.15 5 5.1 9.376 8.853 13.125 3.751 3.75 8.126 6.703 13.125 8.855a38.98 38.98 0 005.906 2c.66.165 1.124.757 1.124 1.437 0 .68-.464 1.273-1.125 1.44a38.9 38.9 0 00-5.905 1.998c-5 2.152-9.375 5.105-13.125 8.854-3.749 3.751-6.702 8.126-8.854 13.125a38.97 38.97 0 00-2 5.906 1.485 1.485 0 01-1.438 1.124c-.68 0-1.272-.464-1.438-1.125a38.9 38.9 0 00-2-5.905c-2.151-5-5.103-9.375-8.854-13.125-3.75-3.749-8.125-6.702-13.125-8.854a38.97 38.97 0 00-5.905-2A1.485 1.485 0 010 32.448c0-.68.465-1.272 1.125-1.438a38.9 38.9 0 005.905-2c5-2.151 9.376-5.104 13.125-8.854 3.75-3.749 6.703-8.125 8.855-13.125a38.97 38.97 0 002-5.905A1.485 1.485 0 0132.447 0z" fill="url(#gemiGrad2)"/><defs><linearGradient id="gemiGrad2" x1="18" y1="43" x2="52" y2="15" gradientUnits="userSpaceOnUse"><stop stop-color="#4285f4"/><stop offset="1" stop-color="#a374db"/></linearGradient></defs></svg> Gemini</button>
+    <button class="dest-btn" id="chatgptDestBtn"><svg width="16" height="16" viewBox="0 0 2406 2406" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><path d="M1 578.4C1 259.5 259.5 1 578.4 1h1249.1c319 0 577.5 258.5 577.5 577.4V2406H578.4C259.5 2406 1 2147.5 1 1828.6V578.4z" fill="#74aa9c"/><path id="s2a" d="M1107.3 299.1c-198 0-373.9 127.3-435.2 315.3L650 743.5v427.9c0 21.4 11 40.4 29.4 51.4l344.5 198.5V833.3h.1v-27.9L1372.7 604c33.7-19.5 70.4-32.9 108.5-39.8L1447.6 450.3C1361 353.5 1237.1 298.5 1107.3 299.1zm0 117.5-.6.6c79.7 0 156.3 27.5 217.6 78.4-2.5 1.2-7.4 4.3-11 6.1L952.8 709.3c-18.4 10.4-29.4 30-29.4 51.4V1248l-155.1-89.4V755.8c-.1-187.1 151.6-338.9 339-339.2z" fill="#fff"/><use xlink:href="#s2a" transform="rotate(60 1203 1203)"/><use xlink:href="#s2a" transform="rotate(120 1203 1203)"/><use xlink:href="#s2a" transform="rotate(180 1203 1203)"/><use xlink:href="#s2a" transform="rotate(240 1203 1203)"/><use xlink:href="#s2a" transform="rotate(300 1203 1203)"/></svg> ChatGPT</button>
+    <button class="dest-btn" id="saveDestBtn">Save as .txt</button>
+
+    <label id="instructionsCheckboxLabel" class="instructions-checkbox-label" style="display:none;">
+      <input type="checkbox" id="instructionsCheckbox" checked>
+      Port my operating instructions with this thread
+    </label>
+
+    <div id="screen2Status"></div>
+  </div>
+
+  <!-- Moderation Modal -->
+  <div id="moderationOverlay">
+    <div id="moderationModal">
+      <p id="moderationMessage">We're sorry, this content may contain subject matter that violates either Portility's or an LLM's Terms of Service. If you believe we are mistaken, we would love it if you told us why. Thanks!</p>
+      <button id="modalOkayBtn" class="modal-btn">Okay</button>
+      <button id="modalErrorBtn" class="modal-btn">This is an error</button>
+      <div id="modalFeedbackArea">
+        <textarea id="modalFeedbackText" placeholder="Tell us why you think this is an error..."></textarea>
+        <button id="modalSubmitBtn">Submit</button>
+      </div>
+      <div id="modalThanks">Thanks for letting us know!</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PORT MY CHAT PRO — Review Screen
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="proReview">
+    <div class="pro-header">
+      <span class="pro-title">Project Brief</span>
+      <button id="proBackBtn" class="pro-back-btn">&larr; Back</button>
+    </div>
+
+    <!-- Loading state -->
+    <div id="proLoading" class="pro-loading">
+      <div class="spinner"></div>
+      <div>Generating project brief...</div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:4px;">This may take 10-20 seconds</div>
+    </div>
+
+    <!-- Content (hidden until response arrives) -->
+    <div id="proContent" style="display:none;">
+      <div id="proBriefTitle" style="font-size:14px;font-weight:700;color:#111;margin-bottom:8px;"></div>
+      <div id="proBriefPreview" class="pro-brief-preview"></div>
+
+      <div id="proAssetsSection">
+        <div class="pro-assets-title">Assets</div>
+        <div class="pro-assets-hint">Pre-selected items are recommended by AI. Adjust as needed.</div>
+        <table class="pro-asset-table">
+          <thead>
+            <tr>
+              <th style="width:28px;"></th>
+              <th>Asset</th>
+              <th>Type</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody id="proAssetTableBody"></tbody>
+        </table>
+      </div>
+
+      <div id="proNoAssets" class="pro-no-assets" style="display:none;">No assets detected in this conversation.</div>
+
+      <div id="proError" style="font-size:11px;color:#dc2626;margin-bottom:8px;min-height:14px;"></div>
+
+      <div class="pro-actions">
+        <button id="proConfirmBtn" class="btn-primary">Confirm &amp; Save</button>
+      </div>
+      <div id="proStatus" style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;min-height:14px;"></div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="encryption.js"></script>
+  <script src="oauth.js"></script>
+  <script src="firestore.js"></script>
+  <script src="questions-config.js"></script>
+  <script src="port-me-prompts.js"></script>
+  <script src="questionnaire.js"></script>
+  <script src="indexeddb.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

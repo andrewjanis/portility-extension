@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Portility Settings</title>
+  <link rel="stylesheet" href="styles/options.css">
+</head>
+<body>
+  <h1>Settings</h1>
+
+  <!-- Backup -->
+  <div class="section">
+    <div class="section-title">Backup</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Back up assets to Google Drive</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="driveBackupToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">When enabled, copies of your images and files are saved to a Google Drive folder as backup. (You must be signed in to your Google account)</div>
+    <div id="driveStatus" class="drive-status">
+      <span class="status-dot"></span>
+      <span>Connected</span>
+      <button id="driveDisconnectBtn" class="disconnect-link">Disconnect</button>
+    </div>
+  </div>
+
+  <!-- Image Quality -->
+  <div class="section">
+    <div class="section-title">Image Quality</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Compress images for destination</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="compressToggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">Reduces image size before sending to the destination. Saves your tokens but lowers image detail.</div>
+  </div>
+
+  <!-- Google Account -->
+  <div class="section">
+    <div class="section-title">Google Account</div>
+    <div id="accountSignedIn" style="display:none;">
+      <div class="account-status">
+        <span class="status-dot"></span>
+        <span id="accountEmail" class="toggle-label"></span>
+      </div>
+      <div class="section-description">Signing out will also disconnect Google Drive.</div>
+      <button id="signOutBtn" class="btn-danger">Sign Out</button>
+    </div>
+    <div id="accountSignedOut" style="display:none;">
+      <div class="account-status">
+        <span class="status-dot status-dot-gray"></span>
+        <span class="toggle-label">Not signed in</span>
+      </div>
+      <div class="section-description">Sign in to enable Google Drive backup and sync.</div>
+      <button id="signInBtn" class="btn-primary-sm">Sign In</button>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
