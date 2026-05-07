@@ -1,3 +1,5 @@
+import Stripe from 'https://esm.sh/stripe@14';
+
 /**
  * Portility — Cloudflare Worker proxy
  * Hides API keys from the Chrome extension.
