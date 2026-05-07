@@ -12,6 +12,27 @@
  *   ANTHROPIC_API_KEY — your Anthropic API key
  */
 
+async function handleStripeWebhook(request, env) {
+  const stripe = require('stripe')(env.STRIPE_SECRET_KEY);
+  const body = await request.text();
+  const sig = request.headers.get('stripe-signature');
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(body, sig, env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return new Response('Webhook signature verification failed', { status: 400 });
+  }
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const firebaseUID = session.metadata.firebase_uid;
+    if (firebaseUID) {
+      const userRef = db.collection('users').doc(firebaseUID);
+      await userRef.update({ tier: 'paid' });
+    }
+  }
+  return new Response('Webhook received', { status: 200 });
+}
+
 export default {
   async fetch(request, env) {
     // CORS headers for Chrome extension
@@ -44,6 +65,8 @@ export default {
         return await handleSecondOpinion(request, env, corsHeaders);
       } else if (path === '/compare') {
         return await handleCompare(request, env, corsHeaders);
+      } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
+        return handleStripeWebhook(request, env);
       } else {
         return new Response('Not found', { status: 404, headers: corsHeaders });
       }
