@@ -1675,53 +1675,89 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Step 1: Detect platform from active tab
-    var tab = await new Promise(function (resolve) {
-      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        resolve(tabs[0]);
-      });
-    });
-
-    var platform = 'claude';
-    if (tab && tab.url) {
-      if (tab.url.includes('chatgpt.com')) platform = 'chatgpt';
-      else if (tab.url.includes('gemini.google.com')) platform = 'gemini';
-      else if (tab.url.includes('claude.ai')) platform = 'claude';
-    }
-
-    // Step 2: Retrieve the last Pro summary from storage
-    var stored = await new Promise(function (resolve) {
-      chrome.storage.local.get('lastProBrief', function (r) { resolve(r.lastProBrief); });
-    });
-
-    if (!stored || !stored.brief) {
-      setStatus('Run Port My Chat Pro first to generate a brief.', true);
-      return;
-    }
-
-    var artifact = stored.brief;
-
-    // Step 3: Compress any base64 images embedded in the artifact
-    var imgRegex = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
-    var matches = artifact.match(imgRegex);
-    if (matches) {
-      for (var i = 0; i < matches.length; i++) {
-        try {
-          var compressed = await compressImage(matches[i]);
-          artifact = artifact.replace(matches[i], compressed);
-        } catch (e) {
-          console.log('[SecondOpinion] Image compression failed, using original');
-        }
-      }
-    }
-
-    // Step 4: Show loading state
     secondOpinionBtn.disabled = true;
-    expandPopup();
-    setStatus('Getting second opinion\u2026');
+    setStatus('Extracting conversation\u2026');
 
     try {
+      // Step 1: Get active tab and detect platform
+      var tab = await new Promise(function (resolve) {
+        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+          resolve(tabs[0]);
+        });
+      });
+      if (!tab || !tab.id) throw new Error('No active tab found.');
+
+      var platform = 'claude';
+      if (/chatgpt\.com/i.test(tab.url)) platform = 'chatgpt';
+      else if (/gemini\.google\.com/i.test(tab.url)) platform = 'gemini';
+      else if (/claude\.ai/i.test(tab.url)) platform = 'claude';
+
+      // Step 2: Extract conversation from the page
+      var extractResponse = await new Promise(function (resolve, reject) {
+        chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO' }, function (resp) {
+          if (chrome.runtime.lastError) {
+            reject(new Error('Could not reach the page \u2014 try refreshing.'));
+            return;
+          }
+          if (!resp || !resp.success) {
+            reject(new Error(resp && resp.error ? resp.error : 'Extraction failed.'));
+            return;
+          }
+          resolve(resp);
+        });
+      });
+
+      if (!extractResponse.text) throw new Error('No conversation text found on page.');
+
+      // Step 3: Generate summary via /summarize-pro
+      setStatus('Analyzing conversation\u2026');
+      var summaryResp = await fetch(proxyBase + '/summarize-pro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation: extractResponse.text,
+          assets: extractResponse.assets || [],
+        }),
+      });
+
+      if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
+      var summaryData = await summaryResp.json();
+
+      var contentText = '';
+      if (summaryData.content && summaryData.content.length > 0) {
+        contentText = summaryData.content[0].text || '';
+      }
+
+      var parsed;
+      try {
+        var jsonStr = contentText;
+        var codeBlockMatch = contentText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+        if (codeBlockMatch) jsonStr = codeBlockMatch[1];
+        parsed = JSON.parse(jsonStr);
+      } catch (e) {
+        parsed = { title: 'Project Brief', brief: contentText, assets: [] };
+      }
+
+      var artifact = parsed.brief || contentText;
+
+      // Step 4: Compress any embedded base64 images
+      var imgRegex = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
+      var imgMatches = artifact.match(imgRegex);
+      if (imgMatches) {
+        for (var i = 0; i < imgMatches.length; i++) {
+          try {
+            var compressed = await compressImage(imgMatches[i]);
+            artifact = artifact.replace(imgMatches[i], compressed);
+          } catch (e) {
+            console.log('[SecondOpinion] Image compression failed, using original');
+          }
+        }
+      }
+
       // Step 5: POST to /second-opinion
+      setStatus('Getting second opinion\u2026');
+      expandPopup();
+
       var soResp = await fetch(proxyBase + '/second-opinion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1729,13 +1765,11 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       var soData = await soResp.json();
-      if (!soResp.ok) {
-        throw new Error(soData.error || 'Second opinion request failed');
-      }
-
-      setStatus('Comparing responses\u2026');
+      if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
 
       // Step 6: POST to /compare
+      setStatus('Comparing responses\u2026');
+
       var compareResp = await fetch(proxyBase + '/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1743,9 +1777,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       var compareData = await compareResp.json();
-      if (!compareResp.ok) {
-        throw new Error(compareData.error || 'Comparison request failed');
-      }
+      if (!compareResp.ok) throw new Error(compareData.error || 'Comparison request failed');
 
       // Step 7: Pass to results UI (Task 14)
       showSecondOpinionResults({
@@ -1780,7 +1812,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Upgrade button ──────────────────────────────────────────────────────
   upgradeBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'https://portility.ai/upgrade' });
+    chrome.tabs.create({ url: 'https://www.portility.ai/pricing' });
   });
 
   // ─── Port Me (free) — same handler as Port Me Pro ────────────────────────
