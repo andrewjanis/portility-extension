@@ -1676,7 +1676,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     secondOpinionBtn.disabled = true;
-    setStatus('Extracting conversation\u2026');
+    showDialLoading('Reading conversation\u2026');
 
     try {
       // Step 1: Get active tab and detect platform
@@ -1710,7 +1710,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!extractResponse.text) throw new Error('No conversation text found on page.');
 
       // Step 3: Generate summary via /summarize-pro
-      setStatus('Analyzing conversation\u2026');
+      updateDialStatus('Analyzing conversation\u2026');
       var summaryResp = await fetch(proxyBase + '/summarize-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1755,8 +1755,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Step 5: POST to /second-opinion
-      setStatus('Getting second opinion\u2026');
-      expandPopup();
+      updateDialStatus('Getting a second opinion\u2026');
 
       var soResp = await fetch(proxyBase + '/second-opinion', {
         method: 'POST',
@@ -1768,7 +1767,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
 
       // Step 6: POST to /compare
-      setStatus('Comparing responses\u2026');
+      updateDialStatus('Comparing both responses\u2026');
 
       var compareResp = await fetch(proxyBase + '/compare', {
         method: 'POST',
@@ -1788,6 +1787,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
     } catch (err) {
+      soResultsEl.classList.remove('so-loading');
+      soResultsEl.style.display = 'none';
+      screen1.style.display = 'block';
       resetPopup();
       setStatus(err.message || 'Something went wrong.', true);
     } finally {
@@ -1795,11 +1797,167 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Placeholder — will be implemented in Task 14 (results UI)
+  // ── Second Opinion Results UI (SVG Gauge Dial) ────────────────────────────
+  var soResultsEl = document.getElementById('soResults');
+  var soBackBtn = document.getElementById('soBackBtn');
+  var soModelName = document.getElementById('so-model-name');
+  var soViewFullBtn = document.getElementById('soViewFullBtn');
+  var _soCurrentScore = 0;
+  var _soAnimFrame;
+  var _soFullText = '';
+
+  function soZoneId(score) {
+    return score < 34 ? 'conflict' : score < 67 ? 'mixed' : 'agrees';
+  }
+
+  function soZoneColors(score) {
+    if (score < 34) return { text: '#c43030', needle: '#E24B4A' };
+    if (score < 67) return { text: '#a07800', needle: '#c9a000' };
+    return { text: '#059618', needle: '#09d624' };
+  }
+
+  function soTypeColors(questionType) {
+    var map = {
+      factual:    ['#E6F1FB', '#185FA5', '#B5D4F4'],
+      subjective: ['#EEEDFE', '#534AB7', '#CECBF6'],
+      analytical: ['#E1F5EE', '#0F6E56', '#9FE1CB'],
+    };
+    return map[questionType] || map.factual;
+  }
+
+  function soScoreLbl(score) {
+    return score < 34 ? 'Significant disagreement'
+         : score < 67 ? 'Partial overlap'
+         : 'Strong agreement';
+  }
+
+  function soAnimateScore(from, to, textColor) {
+    cancelAnimationFrame(_soAnimFrame);
+    var t0 = performance.now();
+    var scoreEl = document.getElementById('so-score-number');
+    (function tick(t) {
+      var p = Math.min((t - t0) / 900, 1);
+      var e = 1 - Math.pow(1 - p, 3);
+      scoreEl.textContent = Math.round(from + (to - from) * e);
+      scoreEl.setAttribute('fill', textColor);
+      if (p < 1) _soAnimFrame = requestAnimationFrame(tick);
+    })(t0);
+  }
+
+  function escHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+  }
+
   function showSecondOpinionResults(data) {
     console.log('[SecondOpinion] Results:', data);
-    setStatus('Second opinion complete. Results UI coming soon.');
+    var cmp = data.comparison;
+    var score = Math.round(cmp.agreement_score || 0);
+    var c = soZoneColors(score);
+    var zone = soZoneId(score);
+    var questionType = cmp.question_type || 'analytical';
+    var tc = soTypeColors(questionType);
+
+    // Badge
+    var badge = document.getElementById('so-badge');
+    badge.textContent = questionType.charAt(0).toUpperCase() + questionType.slice(1);
+    badge.style.background = tc[0];
+    badge.style.color = tc[1];
+    badge.style.borderColor = tc[2];
+
+    // Ensure gauge band is visible
+    document.getElementById('so-gauge-band').style.opacity = '1';
+
+    // Needle
+    var svgRot = -120 + (score / 100) * 240;
+    document.getElementById('so-needle').style.transform = 'rotate(' + svgRot + 'deg)';
+    document.getElementById('so-needle-main').setAttribute('stroke', c.needle);
+    document.getElementById('so-needle-tail').setAttribute('stroke', c.needle);
+    document.getElementById('so-hub-dot').setAttribute('fill', c.needle);
+
+    // Animated score counter
+    soAnimateScore(_soCurrentScore, score, c.text);
+    _soCurrentScore = score;
+
+    // Score label
+    document.getElementById('so-score-lbl').textContent = soScoreLbl(score);
+
+    // Interpretation
+    document.getElementById('so-interp').textContent = cmp.interpretation || '';
+
+    // Agreements
+    document.getElementById('so-agree-list').innerHTML =
+      (cmp.agreements || []).map(function (a) {
+        return '<div class="so-list-row" style="border-color:#C0DD97">' + escHtml(a) + '</div>';
+      }).join('');
+
+    // Divergences
+    document.getElementById('so-diff-list').innerHTML =
+      (cmp.divergences || []).map(function (d) {
+        return '<div class="so-list-row" style="border-color:#F7C1C1">' + escHtml(d) + '</div>';
+      }).join('');
+
+    // Model name for footer
+    var modelMap = { chatgpt: 'GPT-4o', claude: 'Claude Sonnet 4.6' };
+    soModelName.textContent = 'Comparison model: ' + (modelMap[data.source] || data.source);
+
+    // Store full text for "View full comparison"
+    _soFullText = data.secondOpinion || '';
+
+    // Transition from loading to results
+    soResultsEl.classList.remove('so-loading');
+    document.getElementById('so-status-text').textContent = '';
+    setStatus('');
+    screen1.style.display = 'none';
+    soResultsEl.style.display = 'block';
   }
+
+  function showDialLoading(statusText) {
+    // Reset dial to gray/neutral state
+    document.getElementById('so-score-number').textContent = '\u2026';
+    document.getElementById('so-score-number').setAttribute('fill', '#d1d5db');
+    document.getElementById('so-score-lbl').textContent = '';
+    document.getElementById('so-needle').style.transform = 'rotate(-120deg)';
+    document.getElementById('so-needle-main').setAttribute('stroke', '#d1d5db');
+    document.getElementById('so-needle-tail').setAttribute('stroke', '#d1d5db');
+    document.getElementById('so-hub-dot').setAttribute('fill', '#d1d5db');
+    document.getElementById('so-gauge-band').style.opacity = '0.15';
+    document.getElementById('so-agree-list').innerHTML = '';
+    document.getElementById('so-diff-list').innerHTML = '';
+    document.getElementById('so-interp').textContent = '';
+    document.getElementById('so-status-text').textContent = statusText || '';
+    _soCurrentScore = 0;
+
+    // Add loading class for pulse + hide lists
+    soResultsEl.classList.add('so-loading');
+
+    // Show the results screen
+    screen1.style.display = 'none';
+    soResultsEl.style.display = 'block';
+    expandPopup();
+  }
+
+  function updateDialStatus(statusText) {
+    document.getElementById('so-status-text').textContent = statusText || '';
+  }
+
+  // Expose for console testing (remove before release)
+  window._testSO = showSecondOpinionResults;
+
+  soViewFullBtn.addEventListener('click', function () {
+    if (!_soFullText) return;
+    var blob = new Blob([_soFullText], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    chrome.tabs.create({ url: url });
+  });
+
+  soBackBtn.addEventListener('click', function () {
+    soResultsEl.classList.remove('so-loading');
+    soResultsEl.style.display = 'none';
+    resetPopup();
+    screen1.style.display = 'block';
+  });
 
   secondOpinionBtn.addEventListener('click', function () {
     triggerSecondOpinion();

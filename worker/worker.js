@@ -394,26 +394,22 @@ async function handleCompare(request, env, corsHeaders) {
     });
   }
 
-  var systemPrompt = 'You are an expert analyst comparing two AI-generated reviews of the same project. ' +
-    'Return ONLY valid JSON with no markdown code fences, no extra text. Use this exact structure:\n' +
+  var systemPrompt = 'You are a neutral evaluator comparing two AI responses to the same question. ' +
+    'Judge only on accuracy, completeness, and logical consistency. ' +
+    'Do not consider tone, style, or formatting. ' +
+    'Return JSON only — no preamble, no markdown, no explanation outside the JSON object.\n\n' +
+    'Return this exact JSON structure:\n' +
     '{\n' +
-    '  "agreement_score": <number 0-100>,\n' +
-    '  "areas_of_agreement": [\n' +
-    '    { "title": "Short title", "detail": "Explanation of what both AIs agree on" },\n' +
-    '    { "title": "Short title", "detail": "..." },\n' +
-    '    { "title": "Short title", "detail": "..." }\n' +
-    '  ],\n' +
-    '  "areas_of_disagreement": [\n' +
-    '    { "title": "Short title", "detail": "Explanation of where the AIs differ" },\n' +
-    '    { "title": "Short title", "detail": "..." },\n' +
-    '    { "title": "Short title", "detail": "..." }\n' +
-    '  ]\n' +
+    '  "question_type": "factual" | "subjective" | "analytical",\n' +
+    '  "agreement_score": <integer 0-100>,\n' +
+    '  "agreements": ["<string>", "<string>", "<string>"],\n' +
+    '  "divergences": ["<string>", "<string>", "<string>"],\n' +
+    '  "interpretation": "<one sentence: what the score means given the question type>"\n' +
     '}\n\n' +
     'Rules:\n' +
     '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
-    '- Provide EXACTLY 3 areas_of_agreement and 3 areas_of_disagreement\n' +
-    '- Each title should be concise (3-6 words)\n' +
-    '- Each detail should be 1-2 sentences';
+    '- Provide EXACTLY 3 agreements and 3 divergences\n' +
+    '- Each agreement/divergence should be 1-2 concise sentences';
 
   var response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -429,7 +425,7 @@ async function handleCompare(request, env, corsHeaders) {
       messages: [
         {
           role: 'user',
-          content: 'ORIGINAL ANALYSIS:\n\n' + original + '\n\n---\n\nSECOND OPINION:\n\n' + secondOpinion,
+          content: 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion,
         },
       ],
     }),
