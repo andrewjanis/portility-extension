@@ -1592,6 +1592,8 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       await saveProjectBrief(briefRecord);
+      // Persist brief for Second Opinion retrieval
+      chrome.storage.local.set({ lastProBrief: { brief: _proData.brief, timestamp: Date.now() } });
       crumb('pro_saved');
 
       // Download as .md file
@@ -1663,6 +1665,112 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── Feature request ──────────────────────────────────────────────────────
   featureBtn.addEventListener('click', () => {
     chrome.tabs.create({ url: FEATURE_REQUEST_URL });
+  });
+
+  // ─── Second Opinion ────────────────────────────────────────────────────────
+  async function triggerSecondOpinion() {
+    var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+    if (!proxyBase) {
+      setStatus('Worker URL not configured.', true);
+      return;
+    }
+
+    // Step 1: Detect platform from active tab
+    var tab = await new Promise(function (resolve) {
+      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        resolve(tabs[0]);
+      });
+    });
+
+    var platform = 'claude';
+    if (tab && tab.url) {
+      if (tab.url.includes('chatgpt.com')) platform = 'chatgpt';
+      else if (tab.url.includes('gemini.google.com')) platform = 'gemini';
+      else if (tab.url.includes('claude.ai')) platform = 'claude';
+    }
+
+    // Step 2: Retrieve the last Pro summary from storage
+    var stored = await new Promise(function (resolve) {
+      chrome.storage.local.get('lastProBrief', function (r) { resolve(r.lastProBrief); });
+    });
+
+    if (!stored || !stored.brief) {
+      setStatus('Run Port My Chat Pro first to generate a brief.', true);
+      return;
+    }
+
+    var artifact = stored.brief;
+
+    // Step 3: Compress any base64 images embedded in the artifact
+    var imgRegex = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
+    var matches = artifact.match(imgRegex);
+    if (matches) {
+      for (var i = 0; i < matches.length; i++) {
+        try {
+          var compressed = await compressImage(matches[i]);
+          artifact = artifact.replace(matches[i], compressed);
+        } catch (e) {
+          console.log('[SecondOpinion] Image compression failed, using original');
+        }
+      }
+    }
+
+    // Step 4: Show loading state
+    secondOpinionBtn.disabled = true;
+    expandPopup();
+    setStatus('Getting second opinion\u2026');
+
+    try {
+      // Step 5: POST to /second-opinion
+      var soResp = await fetch(proxyBase + '/second-opinion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief: artifact, platform: platform }),
+      });
+
+      var soData = await soResp.json();
+      if (!soResp.ok) {
+        throw new Error(soData.error || 'Second opinion request failed');
+      }
+
+      setStatus('Comparing responses\u2026');
+
+      // Step 6: POST to /compare
+      var compareResp = await fetch(proxyBase + '/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ original: artifact, secondOpinion: soData.text }),
+      });
+
+      var compareData = await compareResp.json();
+      if (!compareResp.ok) {
+        throw new Error(compareData.error || 'Comparison request failed');
+      }
+
+      // Step 7: Pass to results UI (Task 14)
+      showSecondOpinionResults({
+        secondOpinion: soData.text,
+        source: soData.source,
+        platform: platform,
+        comparison: compareData,
+      });
+
+    } catch (err) {
+      resetPopup();
+      setStatus(err.message || 'Something went wrong.', true);
+    } finally {
+      secondOpinionBtn.disabled = false;
+    }
+  }
+
+  // Placeholder — will be implemented in Task 14 (results UI)
+  function showSecondOpinionResults(data) {
+    console.log('[SecondOpinion] Results:', data);
+    setStatus('Second opinion complete. Results UI coming soon.');
+  }
+
+  secondOpinionBtn.addEventListener('click', function () {
+    triggerSecondOpinion();
   });
 
   // ─── Settings gear ─────────────────────────────────────────────────────────
