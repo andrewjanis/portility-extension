@@ -9,7 +9,7 @@
   <h1>Settings</h1>
 
   <!-- Backup -->
-  <div class="section">
+  <div class="section" id="backupSection">
     <div class="section-title">Backup</div>
     <div class="toggle-row">
       <span class="toggle-label">Back up assets to Google Drive</span>
@@ -27,7 +27,7 @@
   </div>
 
   <!-- Image Quality -->
-  <div class="section">
+  <div class="section" id="imageQualitySection">
     <div class="section-title">Image Quality</div>
     <div class="toggle-row">
       <span class="toggle-label">Compress images for destination</span>
@@ -37,6 +37,14 @@
       </label>
     </div>
     <div class="section-description">Reduces image size before sending to the destination. Saves your tokens but lowers image detail.</div>
+  </div>
+
+  <!-- Port Me Instructions -->
+  <div class="section">
+    <div class="section-title">Port Me Instructions</div>
+    <div class="section-description">Re-run the questionnaire to update how your AI speaks with you.</div>
+    <button id="editInstructionsBtn" class="btn-primary-sm">Edit Instructions</button>
+    <div id="editInstructionsNote" class="section-description" style="display:none;color:#16a34a;margin-top:6px;">Open the Portility popup to continue.</div>
   </div>
 
   <!-- Google Account -->

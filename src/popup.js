@@ -232,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Port Operating Instructions elements ──────────────────────────────────
   const portInstructionsBtn = document.getElementById('portInstructionsBtn');
   const portStatusEl = document.getElementById('portStatus');
-  const editInstructionsBtn = document.getElementById('editInstructionsBtn');
 
   // ── Instructions checkbox ────────────────────────────────────────────────
   const instructionsCheckbox = document.getElementById('instructionsCheckbox');
@@ -258,6 +257,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Port My Chat Pro elements ──────────────────────────────────────────
   const proChatBtn = document.getElementById('proChatBtn');
+  const freeButtonsDiv = document.getElementById('free-buttons');
+  const paidButtonsDiv = document.getElementById('paid-buttons');
+  const upgradeBtn = document.getElementById('upgradeBtn');
+  const secondOpinionBtn = document.getElementById('secondOpinionBtn');
+  const portInstructionsBtnFree = document.getElementById('portInstructionsBtnFree');
   const proReview = document.getElementById('proReview');
   const proBackBtn = document.getElementById('proBackBtn');
   const proLoading = document.getElementById('proLoading');
@@ -271,8 +275,64 @@ document.addEventListener('DOMContentLoaded', () => {
   const proError = document.getElementById('proError');
   const proStatus = document.getElementById('proStatus');
 
+  // ── Popup resize helper ────────────────────────────────────────────────
+  function setPopupSize(width, height) {
+    document.body.style.width = width + 'px';
+    document.body.style.height = height ? height + 'px' : 'auto';
+    document.body.style.minHeight = height ? height + 'px' : '';
+  }
+
+  function expandPopup() { setPopupSize(400, 550); }
+  function resetPopup() { setPopupSize(220, 300); }
+
   // ── Pro state ──────────────────────────────────────────────────────────
   let _proData = null;
+
+  // ── User tier state ───────────────────────────────────────────────────
+  let _userTier = 'free'; // 'free' or 'paid'
+  const TIER_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+  async function checkUserTier() {
+    // Step 1: Check cached tier with timestamp
+    var cached = await new Promise(function (resolve) {
+      chrome.storage.local.get('userTier', function (result) { resolve(result.userTier); });
+    });
+
+    if (cached && cached.tier && cached.timestamp && (Date.now() - cached.timestamp < TIER_CACHE_TTL)) {
+      console.log('[Popup] Using cached tier:', cached.tier);
+      _userTier = cached.tier;
+      applyTierUI();
+      return;
+    }
+
+    // Step 2: Cache missing or stale — fetch fresh from Firestore
+    try {
+      var auth = await ensureAuthenticated();
+      var tier = await getUserTier(auth.idToken, auth.firebaseUid);
+      _userTier = tier;
+      chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
+      console.log('[Popup] Fresh tier from Firestore:', tier);
+      applyTierUI();
+    } catch (e) {
+      // Auth not available or Firestore unreachable — use cached tier if any
+      if (cached && cached.tier) {
+        _userTier = cached.tier;
+      }
+      console.log('[Popup] Tier refresh skipped:', e.message);
+      applyTierUI();
+    }
+  }
+
+  function applyTierUI() {
+    var isPaid = _userTier === 'paid';
+    console.log('[Popup] User tier:', _userTier);
+
+    if (freeButtonsDiv) freeButtonsDiv.style.display = isPaid ? 'none' : '';
+    if (paidButtonsDiv) paidButtonsDiv.style.display = isPaid ? '' : 'none';
+  }
+
+  // Check tier on popup load
+  checkUserTier();
 
   // ── Port mode state ────────────────────────────────────────────────────
   let _portMode = 'chat'; // 'chat' or 'instructions'
@@ -829,20 +889,17 @@ document.addEventListener('DOMContentLoaded', () => {
     portStatusEl.style.lineHeight = '1.4';
   }
 
-  // ── Edit Instructions button ──────────────────────────────────────────────
-  editInstructionsBtn.addEventListener('click', function () {
-    startQuestionnaire(true);
-  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // NORMAL UI SETUP
   // ═══════════════════════════════════════════════════════════════════════════
 
   function showNormalUI() {
-    // Show edit link if questionnaire has been completed previously
-    chrome.storage.local.get('questionnaire_completed', function (data) {
-      if (data.questionnaire_completed) {
-        editInstructionsBtn.style.display = 'inline';
+    // Check if settings page requested an edit-instructions launch
+    chrome.storage.local.get('edit_instructions_pending', function (data) {
+      if (data.edit_instructions_pending) {
+        chrome.storage.local.remove('edit_instructions_pending');
+        startQuestionnaire(true);
       }
     });
   }
@@ -1611,5 +1668,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── Settings gear ─────────────────────────────────────────────────────────
   settingsGearBtn.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
+  });
+
+  // ─── Upgrade button ──────────────────────────────────────────────────────
+  upgradeBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: 'https://portility.ai/upgrade' });
+  });
+
+  // ─── Port Me (free) — same handler as Port Me Pro ────────────────────────
+  portInstructionsBtnFree.addEventListener('click', function () {
+    portInstructionsBtn.click();
   });
 });

@@ -187,3 +187,16 @@ h1 {
   background: #14B8A6;
   color: #fff;
 }
+
+/* ── Locked / paid gating ───────────────────────────────────────── */
+.locked {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.paid-label {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-left: 6px;
+}

@@ -5,11 +5,30 @@ document.addEventListener('DOMContentLoaded', function () {
   var driveStatus = document.getElementById('driveStatus');
   var driveDisconnectBtn = document.getElementById('driveDisconnectBtn');
   var compressToggle = document.getElementById('compressToggle');
+  var editInstructionsBtn = document.getElementById('editInstructionsBtn');
+  var editInstructionsNote = document.getElementById('editInstructionsNote');
   var signOutBtn = document.getElementById('signOutBtn');
   var signInBtn = document.getElementById('signInBtn');
   var accountSignedIn = document.getElementById('accountSignedIn');
   var accountSignedOut = document.getElementById('accountSignedOut');
   var accountEmail = document.getElementById('accountEmail');
+
+  // ─── Tier gating ─────────────────────────────────────────────────────────
+  var backupSection = document.getElementById('backupSection');
+  var imageQualitySection = document.getElementById('imageQualitySection');
+
+  chrome.storage.local.get('userTier', function (result) {
+    var tier = (result.userTier && result.userTier.tier) || 'free';
+    if (tier !== 'paid') {
+      [backupSection, imageQualitySection].forEach(function (section) {
+        section.classList.add('locked');
+        var label = document.createElement('span');
+        label.className = 'paid-label';
+        label.textContent = 'Paid feature';
+        section.querySelector('.section-title').appendChild(label);
+      });
+    }
+  });
 
   // ─── Load saved settings ──────────────────────────────────────────────────
   chrome.storage.local.get(
@@ -79,6 +98,13 @@ document.addEventListener('DOMContentLoaded', function () {
   // ─── Image compression toggle ─────────────────────────────────────────────
   compressToggle.addEventListener('change', function () {
     chrome.storage.local.set({ portility_compress_images: compressToggle.checked });
+  });
+
+  // ─── Edit Instructions ───────────────────────────────────────────────────
+  editInstructionsBtn.addEventListener('click', function () {
+    chrome.storage.local.set({ edit_instructions_pending: true }, function () {
+      editInstructionsNote.style.display = 'block';
+    });
   });
 
   // ─── Sign in ──────────────────────────────────────────────────────────────

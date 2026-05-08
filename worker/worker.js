@@ -10,17 +10,66 @@ import Stripe from 'https://esm.sh/stripe@14';
  *   POST /summarize-pro — forwards to Anthropic Claude API (Sonnet, project brief + asset catalog)
  *
  * Environment variables (set as secrets in Cloudflare dashboard):
- *   OPENAI_API_KEY   — your OpenAI API key
- *   ANTHROPIC_API_KEY — your Anthropic API key
+ *   OPENAI_API_KEY        — your OpenAI API key
+ *   ANTHROPIC_API_KEY     — your Anthropic API key
+ *   STRIPE_SECRET_KEY     — Stripe secret key (sk_...)
+ *   STRIPE_WEBHOOK_SECRET — Stripe webhook signing secret (whsec_...)
+ *   FIREBASE_PROJECT_ID   — Firebase project ID (e.g. 'portility')
+ *   FIREBASE_SA_EMAIL     — Service account client_email from JSON key
+ *   FIREBASE_SA_KEY       — Service account private_key from JSON key (PEM format)
  */
 
+// ─── Google Service Account JWT → Access Token ──────────────────────────────
+async function getFirebaseAccessToken(env) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: env.FIREBASE_SA_EMAIL,
+    scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const enc = (obj) => btoa(JSON.stringify(obj)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const signingInput = enc(header) + '.' + enc(payload);
+
+  // Import the PEM private key
+  const pemBody = env.FIREBASE_SA_KEY
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\s/g, '');
+  const keyData = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8', keyData, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']
+  );
+
+  // Sign the JWT
+  const sigBuffer = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(signingInput));
+  const signature = btoa(String.fromCharCode(...new Uint8Array(sigBuffer)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const jwt = signingInput + '.' + signature;
+
+  // Exchange JWT for access token
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + jwt,
+  });
+  const tokenData = await tokenResp.json();
+  if (!tokenData.access_token) {
+    throw new Error('Failed to get Firebase access token: ' + JSON.stringify(tokenData));
+  }
+  return tokenData.access_token;
+}
+
 async function handleStripeWebhook(request, env) {
-  const stripe = require('stripe')(env.STRIPE_SECRET_KEY);
+  const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const body = await request.text();
   const sig = request.headers.get('stripe-signature');
   let event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig, env.STRIPE_WEBHOOK_SECRET);
+    event = await stripe.webhooks.constructEventAsync(body, sig, env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     return new Response('Webhook signature verification failed', { status: 400 });
   }
@@ -28,8 +77,25 @@ async function handleStripeWebhook(request, env) {
     const session = event.data.object;
     const firebaseUID = session.metadata.firebase_uid;
     if (firebaseUID) {
-      const userRef = db.collection('users').doc(firebaseUID);
-      await userRef.update({ tier: 'paid' });
+      // Get a fresh access token from service account
+      const accessToken = await getFirebaseAccessToken(env);
+      // Write tier to Firestore via REST API
+      const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/' +
+        env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + firebaseUID +
+        '?updateMask.fieldPaths=tier';
+      const firestoreResp = await fetch(firestoreUrl, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': 'Bearer ' + accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fields: { tier: { stringValue: 'paid' } },
+        }),
+      });
+      if (!firestoreResp.ok) {
+        console.error('[Webhook] Firestore write failed:', firestoreResp.status, await firestoreResp.text());
+      }
     }
   }
   return new Response('Webhook received', { status: 200 });

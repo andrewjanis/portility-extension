@@ -101,6 +101,50 @@ async function getInstructionsFromFirestore(idToken, firebaseUid) {
  * @param {string} firebaseUid - Firebase UID
  * @returns {Promise<boolean>}
  */
+/**
+ * Read the user's subscription tier from Firestore.
+ * @param {string} idToken - Firebase ID token
+ * @param {string} firebaseUid - Firebase UID
+ * @returns {Promise<string>} 'free' or 'paid'
+ */
+async function getUserTier(idToken, firebaseUid) {
+  var url = 'https://firestore.googleapis.com/v1/projects/' + FIRESTORE_PROJECT_ID +
+    '/databases/(default)/documents/users/' + firebaseUid + '?mask.fieldPaths=tier';
+
+  try {
+    var response = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + idToken },
+    });
+
+    // 404 = user document doesn't exist yet (equivalent of !doc.exists())
+    if (response.status === 404) {
+      console.log('[Firestore] User document not found, defaulting to free');
+      return 'free';
+    }
+
+    if (!response.ok) {
+      console.error('[Firestore] Error fetching user data:', response.status);
+      return 'free';
+    }
+
+    var doc = await response.json();
+
+    // Check document has fields (equivalent of doc.exists() + doc.data())
+    if (!doc.fields) {
+      console.log('[Firestore] User document exists but has no fields, defaulting to free');
+      return 'free';
+    }
+
+    // equivalent of doc.data()?.tier || 'free'
+    var tier = (doc.fields.tier && doc.fields.tier.stringValue) || 'free';
+    console.log('[Firestore] User tier:', tier);
+    return tier;
+  } catch (error) {
+    console.error('[Firestore] Error fetching user data:', error);
+    return 'free';
+  }
+}
+
 async function checkQuestionnaireCompletedRemote(idToken, firebaseUid) {
   try {
     var data = await getInstructionsFromFirestore(idToken, firebaseUid);
