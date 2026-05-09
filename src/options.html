@@ -3,9 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Portility Settings</title>
-  <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css">
   <link rel="stylesheet" href="styles/options.css">
-  <link rel="stylesheet" href="styles/profiles.css">
 </head>
 <body>
   <h1>Settings</h1>
@@ -39,32 +37,37 @@
       </label>
     </div>
     <div class="section-description">Reduces image size before sending to the destination. Saves your tokens but lowers image detail.</div>
-  </div>
-
-  <!-- Port Me Instructions -->
-  <div class="section">
-    <div class="section-title">Port Me Instructions</div>
-    <div class="section-description">Re-run the questionnaire to update how your AI speaks with you.</div>
-    <button id="editInstructionsBtn" class="btn-primary-sm">Edit Instructions</button>
-    <div id="editInstructionsNote" class="section-description" style="display:none;color:#16a34a;margin-top:6px;">Open the Portility popup to continue.</div>
-  </div>
-
-  <!-- Manage Profiles (Pro) -->
-  <div class="section" id="manageProfilesSection">
-    <div class="section-title">Manage Profiles</div>
-    <div class="section-description">Rename, set a default, or delete your Port Me Pro profiles.</div>
-    <div id="manageProfilesList" class="manage-profiles-list">
-      <div class="manage-profiles-empty">Loading profiles...</div>
+    <div class="section-description" style="margin-top:6px;font-size:11px;color:#6b7280;line-height:1.5;">
+      <strong>Turn this on for:</strong> faster answers, less AI use.<br>
+      <strong>Turn this off for:</strong> image work where you want to maintain the full fidelity of the image.
     </div>
+  </div>
+
+  <!-- Port Me -->
+  <div class="section">
+    <div class="section-title">Port Me</div>
+    <div class="section-description">Manage your AI operating instructions and profiles.</div>
+    <button id="managePortMeBtn" class="btn-primary-sm">Manage Port Me</button>
   </div>
 
   <!-- Second Opinion History -->
   <div class="section" id="soHistorySection">
     <div class="section-title">Second Opinion History</div>
-    <div id="soHistoryList" class="so-history-list">
-      <div class="so-history-empty">No comparisons yet.</div>
-    </div>
     <div class="section-description">Your last 20 comparisons are stored locally.</div>
+    <button id="viewSOHistoryBtn" class="btn-primary-sm">View History</button>
+  </div>
+
+  <!-- DEV: Tier Toggle -->
+  <div class="section" id="devTierSection" style="border:2px dashed #f97316;">
+    <div class="section-title" style="color:#f97316;">DEV: Tier Override</div>
+    <div class="toggle-row">
+      <span class="toggle-label" id="devTierLabel">Current: free</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="devTierToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">Toggle between free and paid for testing. Reopen the popup after switching.</div>
   </div>
 
   <!-- Google Account -->
@@ -88,11 +91,8 @@
     </div>
   </div>
 
-  <script src="encryption.js"></script>
   <script src="oauth.js"></script>
   <script src="firestore.js"></script>
-  <script src="profiles-config.js"></script>
-  <script src="profiles-firestore.js"></script>
   <script src="indexeddb.js"></script>
   <script src="options.js"></script>
 </body>

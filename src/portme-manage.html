@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Manage Port Me — Portility</title>
+  <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#f9fafb;color:#111;padding:0}
+    .header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px}
+    .header h1{font-size:20px;font-weight:700;color:#111}
+    .header p{font-size:13px;color:#6b7280;margin-top:4px}
+    .content{max-width:700px;margin:0 auto;padding:24px 32px}
+    .section{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px 24px;margin-bottom:16px}
+    .section-title{font-size:15px;font-weight:700;color:#111;margin-bottom:8px}
+    .section-description{font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:12px}
+    .btn-primary{padding:8px 20px;background:linear-gradient(135deg,#14b8a6,#4ade80);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:box-shadow 0.2s,transform 0.15s;font-family:inherit}
+    .btn-primary:hover:not(:disabled){box-shadow:0 4px 12px rgba(20,184,166,0.3);transform:translateY(-1px)}
+    .btn-primary:disabled{opacity:0.5;cursor:not-allowed}
+    .btn-secondary{padding:8px 20px;background:#fff;color:#374151;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:border-color 0.2s;font-family:inherit}
+    .btn-secondary:hover{border-color:#14b8a6;color:#0d9488}
+    .pro-badge{display:inline-block;font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:20px;padding:2px 8px;margin-left:8px;vertical-align:middle}
+    .profiles-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+    .profile-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;transition:box-shadow 0.15s}
+    .profile-row:hover{box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    .profile-badge{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .profile-badge i{font-size:18px;line-height:1}
+    .profile-badge img{width:22px;height:22px;object-fit:cover;object-position:32% center;border-radius:4px}
+    .profile-info{flex:1;min-width:0}
+    .profile-name-input{font-size:13px;font-weight:600;color:#111;border:none;background:transparent;padding:0;font-family:inherit;width:100%;cursor:pointer}
+    .profile-name-input:hover{color:#0d9488}
+    .profile-name-input:focus{outline:none;color:#0d9488;border-bottom:1px solid #14b8a6}
+    .profile-type-label{font-size:10px;color:#9ca3af;text-transform:capitalize}
+    .profile-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+    .default-pill{font-size:9px;font-weight:600;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:20px;padding:2px 8px;white-space:nowrap}
+    .default-radio{cursor:pointer;accent-color:#14b8a6}
+    .delete-btn{background:none;border:none;color:#9ca3af;cursor:pointer;padding:2px;font-size:16px;line-height:1;transition:color 0.2s}
+    .delete-btn:hover{color:#dc2626}
+    .delete-btn:disabled{color:#d1d5db;cursor:not-allowed}
+    .empty{font-size:12px;color:#9ca3af;text-align:center;padding:16px}
+    .status-msg{font-size:12px;margin-top:8px;min-height:16px}
+    .status-msg.error{color:#dc2626}
+    .status-msg.success{color:#16a34a}
+    .locked-overlay{opacity:0.45;pointer-events:none;position:relative}
+    .locked-label{font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:8px}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Manage Port Me</h1>
+    <p>View and edit your AI operating instructions and profiles.</p>
+  </div>
+
+  <div class="content">
+    <!-- Instructions Section (all users) -->
+    <div class="section" id="instructionsSection">
+      <div class="section-title">Operating Instructions</div>
+      <div class="section-description">Re-run the questionnaire to update how your AI speaks with you.</div>
+      <button id="editInstructionsBtn" class="btn-secondary">Edit Instructions</button>
+      <div id="editNote" class="status-msg" style="display:none;color:#16a34a;">Open the Portility popup to continue.</div>
+    </div>
+
+    <!-- Profiles Section (paid only) -->
+    <div class="section" id="profilesSection">
+      <div class="section-title">Profiles <span class="pro-badge">Pro</span></div>
+      <div class="section-description">Create up to 5 profiles for different contexts — work, home, hobbies, and more.</div>
+      <div id="profilesList" class="profiles-list">
+        <div class="empty">Loading profiles...</div>
+      </div>
+      <div id="profilesStatus" class="status-msg"></div>
+    </div>
+  </div>
+
+  <script src="encryption.js"></script>
+  <script src="oauth.js"></script>
+  <script src="firestore.js"></script>
+  <script src="profiles-config.js"></script>
+  <script src="profiles-firestore.js"></script>
+  <script src="portme-manage.js"></script>
+</body>
+</html>

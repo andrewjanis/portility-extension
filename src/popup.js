@@ -332,11 +332,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function refreshTierSilently(auth) {
-    getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
-      _userTier = tier;
-      chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
-      applyTierUI();
-    }).catch(function () {});
+    // Check for dev tier override — if set, don't fetch from Firestore
+    chrome.storage.local.get('userTier', function (result) {
+      if (result.userTier && result.userTier.devOverride) {
+        _userTier = result.userTier.tier;
+        applyTierUI();
+        return;
+      }
+      getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
+        _userTier = tier;
+        chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
+        applyTierUI();
+      }).catch(function () {});
+    });
   }
 
   function applyTierUI() {
@@ -2428,6 +2436,45 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.create({ url: FEATURE_REQUEST_URL });
   });
 
+  // ─── Sign in link (hidden if already authenticated) ─────────────────────
+  const loginBtn = document.getElementById('loginBtn');
+  loginBtn.style.display = 'none'; // hidden by default
+
+  // Check both Google token and Firebase token to determine sign-in state
+  chrome.storage.local.get(['firebase_id_token', 'firebase_token_expiry'], function (result) {
+    var hasValidFirebase = result.firebase_id_token && result.firebase_token_expiry &&
+      result.firebase_token_expiry > Date.now();
+    if (hasValidFirebase) {
+      loginBtn.style.display = 'none';
+      return;
+    }
+    // Fallback: check Google auth token
+    chrome.identity.getAuthToken({ interactive: false }, function (token) {
+      if (chrome.runtime.lastError || !token) {
+        loginBtn.style.display = '';
+      }
+    });
+  });
+
+  loginBtn.addEventListener('click', async function () {
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Signing in\u2026';
+    try {
+      var auth = await ensureAuthenticated();
+      refreshTierSilently(auth);
+      // Re-check tier and update UI immediately
+      await checkUserTier();
+      loginBtn.style.display = 'none';
+      crumb('login_btn_success');
+    } catch (e) {
+      loginBtn.textContent = 'Sign in';
+      setStatus('Sign in failed. Try again.', true);
+      crumb('login_btn_failed', { error: (e.message || '').substring(0, 200) });
+    } finally {
+      loginBtn.disabled = false;
+    }
+  });
+
   // ─── Second Opinion ────────────────────────────────────────────────────────
   async function triggerSecondOpinion() {
     var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
@@ -2981,13 +3028,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!_soResultData) return;
     try {
       var auth = await ensureAuthenticated();
-      var html = buildRatingPageHtml(_soResultData, {
+      // Stash data in chrome.storage.local for the rating page to read
+      var ratingData = {
+        originalBrief: _soResultData.originalBrief,
+        secondOpinion: _soResultData.secondOpinion,
+        source: _soResultData.source,
+        platform: _soResultData.platform,
+        comparison: _soResultData.comparison,
         idToken: auth.idToken,
         firebaseUid: auth.firebaseUid,
+      };
+      await new Promise(function (resolve) {
+        chrome.storage.local.set({ portility_rating_data: ratingData }, resolve);
       });
-      var blob = new Blob([html], { type: 'text/html' });
-      var url = URL.createObjectURL(blob);
-      chrome.tabs.create({ url: url });
+      chrome.tabs.create({ url: chrome.runtime.getURL('rating.html') });
     } catch (e) {
       console.error('[RatingPage] Failed to open:', e);
     }
