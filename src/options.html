@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>Portility Settings</title>
+  <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css">
   <link rel="stylesheet" href="styles/options.css">
+  <link rel="stylesheet" href="styles/profiles.css">
 </head>
 <body>
   <h1>Settings</h1>
@@ -47,6 +49,15 @@
     <div id="editInstructionsNote" class="section-description" style="display:none;color:#16a34a;margin-top:6px;">Open the Portility popup to continue.</div>
   </div>
 
+  <!-- Manage Profiles (Pro) -->
+  <div class="section" id="manageProfilesSection">
+    <div class="section-title">Manage Profiles</div>
+    <div class="section-description">Rename, set a default, or delete your Port Me Pro profiles.</div>
+    <div id="manageProfilesList" class="manage-profiles-list">
+      <div class="manage-profiles-empty">Loading profiles...</div>
+    </div>
+  </div>
+
   <!-- Second Opinion History -->
   <div class="section" id="soHistorySection">
     <div class="section-title">Second Opinion History</div>
@@ -77,6 +88,11 @@
     </div>
   </div>
 
+  <script src="encryption.js"></script>
+  <script src="oauth.js"></script>
+  <script src="firestore.js"></script>
+  <script src="profiles-config.js"></script>
+  <script src="profiles-firestore.js"></script>
   <script src="indexeddb.js"></script>
   <script src="options.js"></script>
 </body>

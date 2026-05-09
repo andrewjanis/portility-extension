@@ -5,8 +5,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css">
   <link rel="stylesheet" href="styles/questionnaire.css">
   <link rel="stylesheet" href="styles/pro-review.css">
+  <link rel="stylesheet" href="styles/profiles.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -555,6 +557,82 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════
+       PORT ME PRO — Profile Screens
+       ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Profile Picker: list of profiles + actions -->
+  <div id="profilePicker">
+    <button id="profilePickerBackBtn" class="back-btn">&larr; Back</button>
+    <div class="profile-picker-header">
+      <span class="profile-picker-title">Your Profiles</span>
+    </div>
+    <div id="profileList" class="profile-list"></div>
+    <div class="profile-picker-actions">
+      <button id="profileBuildBtn" class="profile-build-btn">Build your Pro profile</button>
+      <button id="profileNewBtn" class="profile-new-btn">+ New Profile</button>
+      <div id="profileNewBlocked" class="profile-new-blocked" style="display:none;"></div>
+    </div>
+    <div id="profilePickerStatus" class="profile-picker-status"></div>
+  </div>
+
+  <!-- Profile Type Selection: 2x2 grid -->
+  <div id="profileTypeScreen">
+    <button id="profileTypeBackBtn" class="back-btn">&larr; Back</button>
+    <div class="profile-type-title">Choose a profile type</div>
+    <div class="profile-type-subtitle">This sets the questions and default look for your profile.</div>
+    <div class="profile-type-grid">
+      <button class="profile-type-card" data-profile-type="work">
+        <i class="ti ti-briefcase"></i>
+        <span class="profile-type-card-label">Work</span>
+      </button>
+      <button class="profile-type-card" data-profile-type="home">
+        <i class="ti ti-home"></i>
+        <span class="profile-type-card-label">Home</span>
+      </button>
+      <button class="profile-type-card" data-profile-type="hobby">
+        <i class="ti ti-palette"></i>
+        <span class="profile-type-card-label">Hobby</span>
+      </button>
+      <button class="profile-type-card" data-profile-type="other">
+        <i class="ti ti-star"></i>
+        <span class="profile-type-card-label">Other</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Profile Questionnaire: 2 dynamic pages -->
+  <div id="profileQuestionnaire">
+    <div id="pq-page1" class="pq-screen">
+      <button id="pqPage1BackBtn" class="back-btn">&larr; Back</button>
+      <img src="icons/logo-horizontal.png" alt="Portility" style="width:90px;height:auto;margin-bottom:8px;">
+      <div id="pq-page1-content"></div>
+      <button id="pqPage1NextBtn" class="pq-btn">Next</button>
+    </div>
+    <div id="pq-page2" class="pq-screen">
+      <button id="pqPage2BackBtn" class="back-btn">&larr; Back</button>
+      <img src="icons/logo-horizontal.png" alt="Portility" style="width:90px;height:auto;margin-bottom:12px;">
+      <div id="pq-page2-content"></div>
+      <button id="pqPage2NextBtn" class="pq-btn">Next</button>
+    </div>
+  </div>
+
+  <!-- Profile Customize: icon, colour, name -->
+  <div id="profileCustomize">
+    <button id="profileCustomizeBackBtn" class="back-btn">&larr; Back</button>
+    <div class="profile-customize-title">Customise your profile</div>
+    <div class="profile-customize-preview">
+      <div id="profilePreviewBadge" class="profile-badge large"></div>
+      <input id="profileNameInput" class="profile-name-input" type="text" placeholder="Profile name" maxlength="30">
+    </div>
+    <div class="profile-section-label">Icon</div>
+    <div id="profileIconGrid" class="profile-icon-grid"></div>
+    <div class="profile-section-label">Colour</div>
+    <div id="profileColourRow" class="profile-colour-row"></div>
+    <button id="profileSaveBtn" class="profile-save-btn">Save &amp; Port</button>
+    <div id="profileCustomizeStatus" class="profile-customize-status"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
        MAIN POPUP — Screen 1 (normal UI)
        ═══════════════════════════════════════════════════════════════════════ -->
   <div id="screen1">
@@ -765,6 +843,9 @@
   <script src="questions-config.js"></script>
   <script src="port-me-prompts.js"></script>
   <script src="questionnaire.js"></script>
+  <script src="profiles-config.js"></script>
+  <script src="profiles-prompts.js"></script>
+  <script src="profiles-firestore.js"></script>
   <script src="indexeddb.js"></script>
   <script src="popup.js"></script>
 </body>

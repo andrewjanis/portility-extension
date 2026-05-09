@@ -275,6 +275,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const proError = document.getElementById('proError');
   const proStatus = document.getElementById('proStatus');
 
+  // ── Profile screen elements ──────────────────────────────────────────────
+  const profilePicker = document.getElementById('profilePicker');
+  const profilePickerBackBtn = document.getElementById('profilePickerBackBtn');
+  const profileList = document.getElementById('profileList');
+  const profileBuildBtn = document.getElementById('profileBuildBtn');
+  const profileNewBtn = document.getElementById('profileNewBtn');
+  const profileNewBlocked = document.getElementById('profileNewBlocked');
+  const profilePickerStatus = document.getElementById('profilePickerStatus');
+
+  const profileTypeScreen = document.getElementById('profileTypeScreen');
+  const profileTypeBackBtn = document.getElementById('profileTypeBackBtn');
+
+  const profileQuestionnaire = document.getElementById('profileQuestionnaire');
+  const pqPage1BackBtn = document.getElementById('pqPage1BackBtn');
+  const pqPage1NextBtn_profile = document.getElementById('pqPage1NextBtn');
+  const pqPage2BackBtn = document.getElementById('pqPage2BackBtn');
+  const pqPage2NextBtn = document.getElementById('pqPage2NextBtn');
+
+  const profileCustomize = document.getElementById('profileCustomize');
+  const profileCustomizeBackBtn = document.getElementById('profileCustomizeBackBtn');
+  const profilePreviewBadge = document.getElementById('profilePreviewBadge');
+  const profileNameInput = document.getElementById('profileNameInput');
+  const profileIconGrid = document.getElementById('profileIconGrid');
+  const profileColourRow = document.getElementById('profileColourRow');
+  const profileSaveBtn = document.getElementById('profileSaveBtn');
+  const profileCustomizeStatus = document.getElementById('profileCustomizeStatus');
+
   // ── Popup resize helper ────────────────────────────────────────────────
   function setPopupSize(width, height) {
     document.body.style.width = width + 'px';
@@ -293,34 +320,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const TIER_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
   async function checkUserTier() {
-    // Step 1: Check cached tier with timestamp
     var cached = await new Promise(function (resolve) {
       chrome.storage.local.get('userTier', function (result) { resolve(result.userTier); });
     });
 
-    if (cached && cached.tier && cached.timestamp && (Date.now() - cached.timestamp < TIER_CACHE_TTL)) {
-      console.log('[Popup] Using cached tier:', cached.tier);
+    if (cached && cached.tier) {
       _userTier = cached.tier;
-      applyTierUI();
-      return;
     }
+    // else _userTier stays 'free' (the default)
+    applyTierUI();
+  }
 
-    // Step 2: Cache missing or stale — fetch fresh from Firestore
-    try {
-      var auth = await ensureAuthenticated();
-      var tier = await getUserTier(auth.idToken, auth.firebaseUid);
+  function refreshTierSilently(auth) {
+    getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
       _userTier = tier;
       chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
-      console.log('[Popup] Fresh tier from Firestore:', tier);
       applyTierUI();
-    } catch (e) {
-      // Auth not available or Firestore unreachable — use cached tier if any
-      if (cached && cached.tier) {
-        _userTier = cached.tier;
-      }
-      console.log('[Popup] Tier refresh skipped:', e.message);
-      applyTierUI();
-    }
+    }).catch(function () {});
   }
 
   function applyTierUI() {
@@ -370,6 +386,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initAnswers();
   let isEditMode = false;
   let _justBuiltInstructions = null;
+
+  // ── Profile state ──────────────────────────────────────────────────────
+  let _cachedProfiles = null;
+  let _editingProfile = null;
+  let _selectedProfileType = null;
+  let _profileAnswers = {};
+  let _selectedIcon = null;
+  let _selectedColourIndex = 0;
+  let _selectedProfileForPort = null;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // DYNAMIC QUESTIONNAIRE RENDERER
@@ -585,12 +610,26 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add('questionnaire-active');
 
     if (isEditMode) {
-      chrome.storage.local.get('questionnaire_answers', function (data) {
+      chrome.storage.local.get('questionnaire_answers', async function (data) {
         if (data.questionnaire_answers) {
           qAnswers = Object.assign({}, qAnswers, data.questionnaire_answers);
           prefillAnswers();
+          showQScreen('q-page1');
+        } else {
+          // Fallback: try Firestore for answers saved on another device
+          try {
+            var auth = await ensureAuthenticated();
+            var fsData = await getInstructionsFromFirestore(auth.idToken, auth.firebaseUid);
+            if (fsData && fsData.answers) {
+              qAnswers = Object.assign({}, qAnswers, fsData.answers);
+              chrome.storage.local.set({ questionnaire_answers: fsData.answers });
+              prefillAnswers();
+            }
+          } catch (e) {
+            console.log('[Questionnaire] Firestore fallback failed:', e);
+          }
+          showQScreen('q-page1');
         }
-        showQScreen('q-page1');
       });
     } else {
       showQScreen('q-page1');
@@ -735,6 +774,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       crumb('quest_auth');
       var auth = await ensureAuthenticated();
+      refreshTierSilently(auth);
       crumb('quest_authed');
       crumb('quest_save');
       try {
@@ -806,34 +846,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   portInstructionsBtn.addEventListener('click', async function () {
     crumb('instr_start');
-    // If questionnaire not completed yet, launch it first
-    var completed = await new Promise(function (resolve) {
-      chrome.storage.local.get('questionnaire_completed', function (data) {
-        resolve(!!data.questionnaire_completed);
-      });
-    });
-    crumb('instr_quest_check', { completed: completed });
-
-    if (!completed) {
-      startQuestionnaire(false);
-      return;
-    }
-
-    _portMode = 'instructions';
 
     try {
       setPortStatus('Loading\u2026');
       portInstructionsBtn.disabled = true;
-      crumb('instr_fetch');
-      _decryptedInstructions = await fetchAndDecryptInstructions();
-      crumb('instr_decrypted');
+
+      // Authenticate
+      var auth = await ensureAuthenticated();
+      refreshTierSilently(auth);
+
+      // Migrate legacy profile if needed
+      crumb('instr_migrate');
+      await migrateLegacyProfile(auth.userId, auth.idToken, auth.firebaseUid);
+
+      // List profiles
+      crumb('instr_list');
+      var profiles = await listProfilesFromFirestore(auth.userId, auth.idToken, auth.firebaseUid);
+      _cachedProfiles = profiles;
+
       setPortStatus('');
       portInstructionsBtn.disabled = false;
-      screen2Label.textContent = 'Port instructions to\u2026';
-      setScreen2Status('');
-      setAllDestBtnsDisabled(false);
-      instructionsCheckboxLabel.style.display = 'none';
-      showScreen('screen2');
+
+      if (profiles.length === 0) {
+        // No profiles — go to type selection to create first one
+        crumb('instr_no_profiles');
+        showProfileScreen('profileTypeScreen');
+      } else if (profiles.length === 1) {
+        // Single profile — port directly
+        crumb('instr_single_profile');
+        trackEvent('portme_pro_profile_selected', { profileId: profiles[0].id, profileType: profiles[0].type });
+        await portWithProfile(profiles[0], auth);
+      } else {
+        // Multiple profiles — show picker
+        crumb('instr_picker');
+        renderProfilePicker(profiles);
+        showProfileScreen('profilePicker');
+        trackEvent('portme_pro_picker_shown', { profileCount: profiles.length });
+      }
     } catch (err) {
       crumb('instr_failed', { error: (err.message || '').substring(0, 200) });
       portInstructionsBtn.disabled = false;
@@ -849,6 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   async function fetchAndDecryptInstructions() {
     var auth = await ensureAuthenticated();
+    refreshTierSilently(auth);
     var data = await getInstructionsFromFirestore(auth.idToken, auth.firebaseUid);
     if (!data) {
       throw new Error('No operating instructions saved yet. Run the questionnaire first.');
@@ -861,6 +911,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /**
    * Try to retrieve decrypted operating instructions for the chat port flow.
+   * Uses the default profile's answers to build instructions on-the-fly.
+   * Falls back to legacy Firestore instructions.
    * Returns the instructions text if available, or null if skipped/unavailable.
    */
   async function tryGetInstructions() {
@@ -872,6 +924,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!completed) return null;
     if (!instructionsCheckbox.checked) return null;
     try {
+      var auth = await ensureAuthenticated();
+      // Try profiles first
+      await migrateLegacyProfile(auth.userId, auth.idToken, auth.firebaseUid);
+      var profiles = await listProfilesFromFirestore(auth.userId, auth.idToken, auth.firebaseUid);
+      if (profiles.length > 0) {
+        // Find default profile, or use first
+        var defaultProfile = profiles.find(function (p) { return p.isDefault; }) || profiles[0];
+        if (defaultProfile.answers) {
+          return buildProfileInstructionPacket(defaultProfile);
+        }
+      }
+      // Fallback to legacy instructions
       return await fetchAndDecryptInstructions();
     } catch (e) {
       // If decryption fails (e.g. old passphrase-encrypted data), skip gracefully
@@ -888,6 +952,694 @@ document.addEventListener('DOMContentLoaded', () => {
     portStatusEl.style.color = isError ? '#dc2626' : '#6b7280';
     portStatusEl.style.lineHeight = '1.4';
   }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PORT ME PRO — PROFILE SCREENS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Show a profile screen by ID and set the corresponding body class.
+   */
+  function showProfileScreen(id) {
+    exitProfileScreens();
+    var classMap = {
+      profilePicker:        'profile-picker-active',
+      profileTypeScreen:    'profile-type-active',
+      profileQuestionnaire: 'profile-questionnaire-active',
+      profileCustomize:     'profile-customize-active',
+    };
+    if (classMap[id]) {
+      document.body.classList.add(classMap[id]);
+    }
+  }
+
+  /**
+   * Exit all profile screens by removing body classes.
+   */
+  function exitProfileScreens() {
+    document.body.classList.remove(
+      'profile-picker-active',
+      'profile-type-active',
+      'profile-questionnaire-active',
+      'profile-customize-active'
+    );
+  }
+
+  /**
+   * Render the profile picker list.
+   * @param {Array} profiles
+   */
+  function renderProfilePicker(profiles) {
+    profileList.innerHTML = '';
+
+    // Pre-select: last-used first (they're already sorted by lastUsed desc)
+    var preselectedId = profiles.length > 0 ? profiles[0].id : null;
+    _selectedProfileForPort = profiles.length > 0 ? profiles[0] : null;
+
+    for (var i = 0; i < profiles.length; i++) {
+      var p = profiles[i];
+      var item = document.createElement('div');
+      item.className = 'profile-list-item' + (p.id === preselectedId ? ' selected' : '');
+      item.setAttribute('data-profile-id', p.id);
+
+      var badge = renderProfileBadge(p, 40);
+      item.appendChild(badge);
+
+      var info = document.createElement('div');
+      info.className = 'profile-list-item-info';
+      var nameEl = document.createElement('div');
+      nameEl.className = 'profile-list-item-name';
+      nameEl.textContent = p.name;
+      info.appendChild(nameEl);
+      var typeEl = document.createElement('div');
+      typeEl.className = 'profile-list-item-type';
+      typeEl.textContent = p.type;
+      info.appendChild(typeEl);
+      item.appendChild(info);
+
+      if (p.isDefault) {
+        var pill = document.createElement('span');
+        pill.className = 'profile-default-pill';
+        pill.textContent = 'Default';
+        item.appendChild(pill);
+      }
+
+      // Click to select
+      (function (profile) {
+        item.addEventListener('click', function () {
+          var items = profileList.querySelectorAll('.profile-list-item');
+          for (var j = 0; j < items.length; j++) { items[j].classList.remove('selected'); }
+          this.classList.add('selected');
+          _selectedProfileForPort = profile;
+        });
+      })(p);
+
+      profileList.appendChild(item);
+    }
+
+    // Handle + New Profile button state
+    if (profiles.length >= MAX_PROFILES) {
+      profileNewBtn.disabled = true;
+      profileNewBlocked.style.display = 'block';
+      profileNewBlocked.textContent = 'Maximum ' + MAX_PROFILES + ' profiles reached.';
+    } else {
+      profileNewBtn.disabled = false;
+      profileNewBlocked.style.display = 'none';
+    }
+
+    profilePickerStatus.textContent = '';
+  }
+
+  /**
+   * Create a profile badge DOM element.
+   * @param {Object} profile - { icon, colourIndex }
+   * @param {number} size - 40 or 72
+   * @returns {HTMLElement}
+   */
+  function renderProfileBadge(profile, size) {
+    var colour = PROFILE_COLOURS[profile.colourIndex] || PROFILE_COLOURS[0];
+    var badge = document.createElement('div');
+    badge.className = 'profile-badge' + (size === 72 ? ' large' : '');
+    badge.style.background = colour.bg;
+    badge.style.border = '1.5px solid ' + colour.swatch;
+
+    if (profile.icon === 'portility') {
+      var img = document.createElement('img');
+      img.src = 'icons/logo-circle.png';
+      img.alt = 'Portility';
+      badge.appendChild(img);
+    } else {
+      var icon = document.createElement('i');
+      icon.className = 'ti ' + profile.icon;
+      icon.style.color = colour.icon;
+      badge.appendChild(icon);
+    }
+
+    return badge;
+  }
+
+  /**
+   * Port with a specific profile: build instructions on-the-fly, then show screen2.
+   * @param {Object} profile
+   * @param {Object} auth
+   */
+  async function portWithProfile(profile, auth) {
+    _portMode = 'instructions';
+
+    if (!profile.answers) {
+      setPortStatus('Profile has no answers — please rebuild it.', true);
+      return;
+    }
+
+    _decryptedInstructions = buildProfileInstructionPacket(profile);
+
+    // Update lastUsed
+    updateProfileLastUsed(profile.id, auth.idToken, auth.firebaseUid).catch(function () {});
+
+    screen2Label.textContent = 'Port instructions to\u2026';
+    setScreen2Status('');
+    setAllDestBtnsDisabled(false);
+    instructionsCheckboxLabel.style.display = 'none';
+    exitProfileScreens();
+    showScreen('screen2');
+  }
+
+  /**
+   * Build a complete instruction packet from a profile's answers and type.
+   * Reuses buildInstructionMap() + deconjugateVerb() from questionnaire.js.
+   * @param {Object} profile - { type, answers }
+   * @returns {string}
+   */
+  function buildProfileInstructionPacket(profile) {
+    var type = profile.type || 'other';
+    var answers = profile.answers || {};
+
+    // Get type-specific header
+    var header = (typeof PROFILE_PROMPTS !== 'undefined' && PROFILE_PROMPTS.headers && PROFILE_PROMPTS.headers[type])
+      ? PROFILE_PROMPTS.headers[type]
+      : (typeof PROFILE_PROMPTS !== 'undefined' && PROFILE_PROMPTS.defaultHeader)
+        ? PROFILE_PROMPTS.defaultHeader
+        : '# My Profile — Operating Instructions\n\n---\n\n';
+
+    // Generate instructions from profile questionnaire config
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[type];
+    if (!config) {
+      return header + '(No profile instructions configured for type: ' + type + ')';
+    }
+
+    var instructions = [];
+    var pages = config.pages;
+
+    for (var p = 0; p < pages.length; p++) {
+      var sections = pages[p].sections;
+      for (var s = 0; s < sections.length; s++) {
+        var section = sections[s];
+        var key = section.key;
+        var answer = answers[key];
+
+        if (section.type === 'multi-select') {
+          if (typeof answer === 'string' && answer) { answer = [answer]; }
+          if (!Array.isArray(answer) || answer.length === 0) continue;
+
+          var map = buildInstructionMap(section);
+          var parts = [];
+          for (var i = 0; i < answer.length; i++) {
+            if ((answer[i] === 'other' || answer[i] === 'custom_text') && answers[key + '_customText']) {
+              var raw = answers[key + '_customText'].trim();
+              if (raw) {
+                parts.push(deconjugateVerb(raw));
+              }
+            } else if (map[answer[i]]) {
+              parts.push(map[answer[i]]);
+            }
+          }
+          if (parts.length > 0) {
+            instructions.push(parts.join(' '));
+          }
+
+        } else if (section.type === 'single-select-chips') {
+          if (!answer) continue;
+          var chipMap = buildInstructionMap(section);
+          if (chipMap[answer]) {
+            instructions.push(chipMap[answer]);
+          }
+
+        } else if (section.type === 'textarea') {
+          if (answer && answer.trim()) {
+            var prefix = section.instructionPrefix || '';
+            instructions.push(prefix + answer.trim());
+          }
+        }
+      }
+    }
+
+    // Also include answers from the general questionnaire (QUESTIONNAIRE_CONFIG)
+    // if they exist in this profile's answers (e.g. migrated profiles)
+    var generalInstructions = generateInstructions(answers);
+    if (generalInstructions.trim()) {
+      instructions.push(generalInstructions);
+    }
+
+    var body = instructions.join('\n\n');
+
+    // Confirmation prompt
+    var confirmationPrompt = (typeof PROFILE_PROMPTS !== 'undefined' && PROFILE_PROMPTS.confirmationPrompt)
+      ? PROFILE_PROMPTS.confirmationPrompt
+      : "When you first respond, confirm you've read these instructions. ";
+
+    return header + body + '\n\n---\n\n' + confirmationPrompt;
+  }
+
+  /**
+   * Initialize profile answers object from a PROFILE_QUESTIONNAIRE_CONFIG type.
+   * @param {string} profileType
+   * @returns {Object}
+   */
+  function initProfileAnswers(profileType) {
+    var answers = {};
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[profileType];
+    if (!config) return answers;
+
+    var pages = config.pages;
+    for (var p = 0; p < pages.length; p++) {
+      var sections = pages[p].sections;
+      for (var s = 0; s < sections.length; s++) {
+        var sec = sections[s];
+        if (sec.type === 'multi-select') {
+          answers[sec.key] = [];
+          answers[sec.key + '_customText'] = '';
+        } else if (sec.type === 'textarea') {
+          answers[sec.key] = '';
+        } else {
+          answers[sec.key] = null;
+        }
+      }
+    }
+    return answers;
+  }
+
+  /**
+   * Render profile-type-specific questions into #pq-page1-content / #pq-page2-content.
+   * @param {string} profileType
+   */
+  function renderProfileQuestionnaire(profileType) {
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[profileType];
+    if (!config) return;
+
+    var pages = config.pages;
+    for (var p = 0; p < pages.length; p++) {
+      var page = pages[p];
+      var container = document.getElementById(page.id + '-content');
+      if (!container) continue;
+      container.innerHTML = '';
+
+      var sections = page.sections;
+      for (var s = 0; s < sections.length; s++) {
+        var sec = sections[s];
+
+        var titleEl = document.createElement('div');
+        titleEl.className = 'q-section-title';
+        titleEl.textContent = sec.title;
+        container.appendChild(titleEl);
+
+        if (sec.type === 'multi-select') {
+          var wrap = document.createElement('div');
+          wrap.setAttribute('data-multiselect', 'true');
+
+          for (var o = 0; o < sec.options.length; o++) {
+            var opt = sec.options[o];
+            var btn = document.createElement('button');
+            btn.className = 'q-option';
+            btn.setAttribute('data-question', sec.key);
+            btn.setAttribute('data-value', opt.value);
+            btn.textContent = opt.label;
+            wrap.appendChild(btn);
+
+            if (opt.customTextPlaceholder) {
+              var otherArea = document.createElement('div');
+              otherArea.className = 'q-other-area';
+              otherArea.id = 'pq-other-area-' + sec.key;
+              var ta = document.createElement('textarea');
+              ta.className = 'q-textarea';
+              ta.id = 'pq-other-text-' + sec.key;
+              ta.placeholder = opt.customTextPlaceholder;
+              otherArea.appendChild(ta);
+              wrap.appendChild(otherArea);
+            }
+          }
+          container.appendChild(wrap);
+
+        } else if (sec.type === 'single-select-chips') {
+          var chipRow = document.createElement('div');
+          chipRow.className = 'q-chips-row';
+          for (var c = 0; c < sec.options.length; c++) {
+            var chipOpt = sec.options[c];
+            var chipBtn = document.createElement('button');
+            chipBtn.className = 'q-option q-chip';
+            chipBtn.setAttribute('data-question', sec.key);
+            chipBtn.setAttribute('data-value', chipOpt.value);
+            chipBtn.textContent = chipOpt.label;
+            chipRow.appendChild(chipBtn);
+          }
+          container.appendChild(chipRow);
+
+        } else if (sec.type === 'textarea') {
+          var textarea = document.createElement('textarea');
+          textarea.className = 'q-textarea';
+          textarea.id = 'pq-textarea-' + sec.key;
+          textarea.placeholder = sec.placeholder || '';
+          container.appendChild(textarea);
+        }
+      }
+    }
+
+    // Wire up handlers
+    wireUpProfileOptionHandlers();
+  }
+
+  /**
+   * Attach click handlers to profile questionnaire option buttons.
+   */
+  function wireUpProfileOptionHandlers() {
+    var allQOptions = profileQuestionnaire.querySelectorAll('.q-option[data-question]');
+    for (var i = 0; i < allQOptions.length; i++) {
+      allQOptions[i].addEventListener('click', function () {
+        var question = this.getAttribute('data-question');
+        var value = this.getAttribute('data-value');
+        var parentWrap = this.closest('[data-multiselect]');
+        var isMultiSelect = !!parentWrap;
+
+        if (isMultiSelect) {
+          this.classList.toggle('selected');
+
+          var arr = _profileAnswers[question];
+          if (!Array.isArray(arr)) { arr = []; _profileAnswers[question] = arr; }
+          var idx = arr.indexOf(value);
+          if (idx >= 0) { arr.splice(idx, 1); } else { arr.push(value); }
+
+          var otherArea = document.getElementById('pq-other-area-' + question);
+          if (otherArea) {
+            if (arr.indexOf('other') >= 0) {
+              otherArea.classList.add('visible');
+              var otherText = document.getElementById('pq-other-text-' + question);
+              if (otherText) otherText.focus();
+            } else {
+              otherArea.classList.remove('visible');
+              _profileAnswers[question + '_customText'] = '';
+            }
+          }
+        } else {
+          var siblings = this.parentElement.querySelectorAll('.q-option[data-question="' + question + '"]');
+          for (var j = 0; j < siblings.length; j++) { siblings[j].classList.remove('selected'); }
+          this.classList.add('selected');
+          _profileAnswers[question] = value;
+        }
+      });
+    }
+  }
+
+  /**
+   * Render the icon grid + colour swatches on the customize screen.
+   */
+  function renderProfileCustomizeScreen() {
+    // Icon grid
+    profileIconGrid.innerHTML = '';
+    for (var i = 0; i < PROFILE_ICONS.length; i++) {
+      var iconId = PROFILE_ICONS[i];
+      var cell = document.createElement('div');
+      cell.className = 'profile-icon-cell' + (iconId === _selectedIcon ? ' selected' : '');
+      cell.setAttribute('data-icon', iconId);
+
+      if (iconId === 'portility') {
+        var img = document.createElement('img');
+        img.src = 'icons/logo-circle.png';
+        img.alt = 'Portility';
+        cell.appendChild(img);
+      } else {
+        var icon = document.createElement('i');
+        icon.className = 'ti ' + iconId;
+        cell.appendChild(icon);
+      }
+
+      (function (id) {
+        cell.addEventListener('click', function () {
+          var cells = profileIconGrid.querySelectorAll('.profile-icon-cell');
+          for (var j = 0; j < cells.length; j++) { cells[j].classList.remove('selected'); }
+          this.classList.add('selected');
+          _selectedIcon = id;
+          updatePreviewBadge();
+        });
+      })(iconId);
+
+      profileIconGrid.appendChild(cell);
+    }
+
+    // Colour swatches
+    profileColourRow.innerHTML = '';
+    for (var c = 0; c < PROFILE_COLOURS.length; c++) {
+      var colour = PROFILE_COLOURS[c];
+      var swatch = document.createElement('div');
+      swatch.className = 'profile-colour-swatch' + (c === _selectedColourIndex ? ' selected' : '');
+      swatch.style.background = colour.swatch;
+      swatch.style.color = colour.swatch;
+      swatch.setAttribute('data-colour-index', c);
+
+      (function (idx) {
+        swatch.addEventListener('click', function () {
+          var swatches = profileColourRow.querySelectorAll('.profile-colour-swatch');
+          for (var j = 0; j < swatches.length; j++) { swatches[j].classList.remove('selected'); }
+          this.classList.add('selected');
+          _selectedColourIndex = idx;
+          updatePreviewBadge();
+        });
+      })(c);
+
+      profileColourRow.appendChild(swatch);
+    }
+
+    // Set name input
+    var defaults = PROFILE_TYPE_DEFAULTS[_selectedProfileType] || PROFILE_TYPE_DEFAULTS.other;
+    if (_editingProfile) {
+      profileNameInput.value = _editingProfile.name;
+    } else {
+      var typeName = _selectedProfileType.charAt(0).toUpperCase() + _selectedProfileType.slice(1);
+      profileNameInput.value = typeName + ' Profile';
+    }
+
+    updatePreviewBadge();
+  }
+
+  /**
+   * Update the 72px preview badge from current icon + colour selections.
+   */
+  function updatePreviewBadge() {
+    var colour = PROFILE_COLOURS[_selectedColourIndex] || PROFILE_COLOURS[0];
+    profilePreviewBadge.innerHTML = '';
+    profilePreviewBadge.style.background = colour.bg;
+    profilePreviewBadge.style.border = '1.5px solid ' + colour.swatch;
+
+    if (_selectedIcon === 'portility') {
+      var img = document.createElement('img');
+      img.src = 'icons/logo-circle.png';
+      img.alt = 'Portility';
+      profilePreviewBadge.appendChild(img);
+    } else {
+      var icon = document.createElement('i');
+      icon.className = 'ti ' + _selectedIcon;
+      icon.style.color = colour.icon;
+      profilePreviewBadge.appendChild(icon);
+    }
+  }
+
+  function showPQScreen(screenId) {
+    var screens = profileQuestionnaire.querySelectorAll('.pq-screen');
+    for (var i = 0; i < screens.length; i++) {
+      screens[i].classList.remove('active');
+    }
+    var target = document.getElementById(screenId);
+    if (target) target.classList.add('active');
+  }
+
+  // ── Profile event handlers ─────────────────────────────────────────────────
+
+  // Back buttons
+  profilePickerBackBtn.addEventListener('click', function () {
+    exitProfileScreens();
+    showScreen('screen1');
+  });
+
+  profileTypeBackBtn.addEventListener('click', function () {
+    if (_cachedProfiles && _cachedProfiles.length > 0) {
+      renderProfilePicker(_cachedProfiles);
+      showProfileScreen('profilePicker');
+    } else {
+      exitProfileScreens();
+      showScreen('screen1');
+    }
+  });
+
+  pqPage1BackBtn.addEventListener('click', function () {
+    showProfileScreen('profileTypeScreen');
+  });
+
+  pqPage2BackBtn.addEventListener('click', function () {
+    showProfileScreen('profileQuestionnaire');
+    showPQScreen('pq-page1');
+  });
+
+  profileCustomizeBackBtn.addEventListener('click', function () {
+    showProfileScreen('profileQuestionnaire');
+    showPQScreen('pq-page2');
+  });
+
+  // Type card click
+  var typeCards = document.querySelectorAll('.profile-type-card');
+  for (var tc = 0; tc < typeCards.length; tc++) {
+    typeCards[tc].addEventListener('click', function () {
+      var type = this.getAttribute('data-profile-type');
+      _selectedProfileType = type;
+      _editingProfile = null;
+      _profileAnswers = initProfileAnswers(type);
+
+      var defaults = PROFILE_TYPE_DEFAULTS[type] || PROFILE_TYPE_DEFAULTS.other;
+      _selectedIcon = defaults.icon;
+      _selectedColourIndex = defaults.colourIndex;
+
+      crumb('profile_type_selected', { type: type });
+      trackEvent('portme_pro_type_selected', { type: type });
+
+      renderProfileQuestionnaire(type);
+      showProfileScreen('profileQuestionnaire');
+      showPQScreen('pq-page1');
+    });
+  }
+
+  // Profile questionnaire page 1 Next
+  pqPage1NextBtn_profile.addEventListener('click', function () {
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[_selectedProfileType];
+    if (!config) return;
+
+    var page1 = config.pages[0];
+    if (!page1) return;
+
+    // Validate: first multi-select must have at least one selection
+    for (var s = 0; s < page1.sections.length; s++) {
+      var sec = page1.sections[s];
+      if (sec.type === 'multi-select') {
+        if (!Array.isArray(_profileAnswers[sec.key]) || _profileAnswers[sec.key].length === 0) {
+          return; // don't advance — need at least one selection
+        }
+        if (Array.isArray(_profileAnswers[sec.key]) && _profileAnswers[sec.key].indexOf('other') >= 0) {
+          var otherText = document.getElementById('pq-other-text-' + sec.key);
+          if (otherText) {
+            var val = otherText.value.trim();
+            if (!val) { otherText.focus(); return; }
+            _profileAnswers[sec.key + '_customText'] = val;
+          }
+        }
+        break; // only validate first multi-select
+      }
+    }
+
+    crumb('profile_quest_page1_done');
+    showPQScreen('pq-page2');
+  });
+
+  // Profile questionnaire page 2 Next → go to customize
+  pqPage2NextBtn.addEventListener('click', function () {
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[_selectedProfileType];
+    if (!config) return;
+
+    // Capture textarea answers
+    var page2 = config.pages[1];
+    if (page2) {
+      for (var s = 0; s < page2.sections.length; s++) {
+        var sec = page2.sections[s];
+        if (sec.type === 'textarea') {
+          var ta = document.getElementById('pq-textarea-' + sec.key);
+          if (ta) _profileAnswers[sec.key] = ta.value.trim();
+        }
+      }
+    }
+
+    crumb('profile_quest_page2_done');
+    renderProfileCustomizeScreen();
+    showProfileScreen('profileCustomize');
+  });
+
+  // "Build your Pro profile" button in picker — port with selected profile
+  profileBuildBtn.addEventListener('click', async function () {
+    if (!_selectedProfileForPort) {
+      profilePickerStatus.textContent = 'Select a profile first.';
+      profilePickerStatus.className = 'profile-picker-status error';
+      return;
+    }
+
+    crumb('profile_build_tapped', { profileId: _selectedProfileForPort.id });
+    trackEvent('portme_pro_build_tapped', { profileId: _selectedProfileForPort.id, profileType: _selectedProfileForPort.type });
+
+    try {
+      profileBuildBtn.disabled = true;
+      profileBuildBtn.textContent = 'Loading\u2026';
+      var auth = await ensureAuthenticated();
+      trackEvent('portme_pro_profile_selected', { profileId: _selectedProfileForPort.id, profileType: _selectedProfileForPort.type });
+      await portWithProfile(_selectedProfileForPort, auth);
+    } catch (err) {
+      profilePickerStatus.textContent = err.message || 'Something went wrong.';
+      profilePickerStatus.className = 'profile-picker-status error';
+    } finally {
+      profileBuildBtn.disabled = false;
+      profileBuildBtn.textContent = 'Build your Pro profile';
+    }
+  });
+
+  // "+ New Profile" button in picker
+  profileNewBtn.addEventListener('click', function () {
+    if (_cachedProfiles && _cachedProfiles.length >= MAX_PROFILES) {
+      trackEvent('portme_pro_new_profile_blocked', { profileCount: _cachedProfiles.length });
+      return;
+    }
+    crumb('profile_new');
+    showProfileScreen('profileTypeScreen');
+  });
+
+  // Save & Port button on customize screen
+  profileSaveBtn.addEventListener('click', async function () {
+    var name = profileNameInput.value.trim();
+    if (!name) {
+      profileCustomizeStatus.textContent = 'Please enter a name.';
+      profileCustomizeStatus.className = 'profile-customize-status error';
+      return;
+    }
+    if (name.length > MAX_PROFILE_NAME_LENGTH) {
+      profileCustomizeStatus.textContent = 'Name is too long (max ' + MAX_PROFILE_NAME_LENGTH + ' chars).';
+      profileCustomizeStatus.className = 'profile-customize-status error';
+      return;
+    }
+
+    profileSaveBtn.disabled = true;
+    profileSaveBtn.textContent = 'Saving\u2026';
+    profileCustomizeStatus.textContent = '';
+
+    try {
+      var auth = await ensureAuthenticated();
+      var now = new Date().toISOString();
+      var isFirst = !_cachedProfiles || _cachedProfiles.length === 0;
+
+      var profile = {
+        id: _editingProfile ? _editingProfile.id : generateProfileId(),
+        name: name,
+        type: _selectedProfileType,
+        icon: _selectedIcon,
+        colourIndex: _selectedColourIndex,
+        answers: _profileAnswers,
+        isDefault: isFirst || (_editingProfile ? _editingProfile.isDefault : false),
+        lastUsed: now,
+        createdAt: _editingProfile ? _editingProfile.createdAt : now,
+      };
+
+      await saveProfileToFirestore(profile, auth.userId, auth.idToken, auth.firebaseUid);
+
+      crumb('profile_saved', { profileId: profile.id, type: profile.type });
+      trackEvent('portme_pro_profile_created', { profileId: profile.id, type: profile.type, icon: profile.icon, colourIndex: profile.colourIndex });
+
+      // Mark questionnaire as completed (for tryGetInstructions compatibility)
+      await new Promise(function (resolve) {
+        chrome.storage.local.set({ questionnaire_completed: true }, resolve);
+      });
+
+      // Port with the new profile
+      await portWithProfile(profile, auth);
+    } catch (err) {
+      crumb('profile_save_failed', { error: (err.message || '').substring(0, 200) });
+      profileCustomizeStatus.textContent = err.message || 'Failed to save. Try again.';
+      profileCustomizeStatus.className = 'profile-customize-status error';
+    } finally {
+      profileSaveBtn.disabled = false;
+      profileSaveBtn.textContent = 'Save & Port';
+    }
+  });
 
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -971,6 +1723,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function showScreen(id) {
     screen1.style.display = id === 'screen1' ? 'block' : 'none';
     screen2.style.display = id === 'screen2' ? 'block' : 'none';
+    // Also exit any profile screen
+    exitProfileScreens();
   }
 
   // ── Status helpers ────────────────────────────────────────────────────────
@@ -1021,8 +1775,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ─── Port Your Conversation button → show Screen 2 ────────────────────────
-  copyBtn.addEventListener('click', () => {
+  copyBtn.addEventListener('click', async () => {
     crumb('port_chat_start');
+    try {
+      var auth = await ensureAuthenticated();
+      refreshTierSilently(auth);
+    } catch (e) {
+      setStatus('Please sign in to continue.', true);
+      return;
+    }
     _portMode = 'chat';
     screen2Label.textContent = 'Port conversation to\u2026';
     setScreen2Status('');
@@ -2255,7 +3016,39 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ─── Port Me (free) — same handler as Port Me Pro ────────────────────────
-  portInstructionsBtnFree.addEventListener('click', function () {
-    portInstructionsBtn.click();
+  portInstructionsBtnFree.addEventListener('click', async function () {
+    crumb('instr_free_start');
+    // Free users: existing single-profile questionnaire flow
+    var completed = await new Promise(function (resolve) {
+      chrome.storage.local.get('questionnaire_completed', function (data) {
+        resolve(!!data.questionnaire_completed);
+      });
+    });
+
+    if (!completed) {
+      startQuestionnaire(false);
+      return;
+    }
+
+    _portMode = 'instructions';
+
+    try {
+      setPortStatus('Loading\u2026');
+      portInstructionsBtnFree.disabled = true;
+      crumb('instr_free_fetch');
+      _decryptedInstructions = await fetchAndDecryptInstructions();
+      crumb('instr_free_decrypted');
+      setPortStatus('');
+      portInstructionsBtnFree.disabled = false;
+      screen2Label.textContent = 'Port instructions to\u2026';
+      setScreen2Status('');
+      setAllDestBtnsDisabled(false);
+      instructionsCheckboxLabel.style.display = 'none';
+      showScreen('screen2');
+    } catch (err) {
+      crumb('instr_free_failed', { error: (err.message || '').substring(0, 200) });
+      portInstructionsBtnFree.disabled = false;
+      setPortStatus(err.message || 'Something went wrong.', true);
+    }
   });
 });

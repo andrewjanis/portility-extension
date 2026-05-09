@@ -13,6 +13,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var accountSignedOut = document.getElementById('accountSignedOut');
   var accountEmail = document.getElementById('accountEmail');
 
+  // ─── Profile management elements ─────────────────────────────────────────
+  var manageProfilesSection = document.getElementById('manageProfilesSection');
+  var manageProfilesList = document.getElementById('manageProfilesList');
+
   // ─── Tier gating ─────────────────────────────────────────────────────────
   var backupSection = document.getElementById('backupSection');
   var imageQualitySection = document.getElementById('imageQualitySection');
@@ -20,13 +24,18 @@ document.addEventListener('DOMContentLoaded', function () {
   chrome.storage.local.get('userTier', function (result) {
     var tier = (result.userTier && result.userTier.tier) || 'free';
     if (tier !== 'paid') {
-      [backupSection, imageQualitySection].forEach(function (section) {
+      [backupSection, imageQualitySection, manageProfilesSection].forEach(function (section) {
+        if (!section) return;
         section.classList.add('locked');
         var label = document.createElement('span');
         label.className = 'paid-label';
         label.textContent = 'Paid feature';
-        section.querySelector('.section-title').appendChild(label);
+        var titleEl = section.querySelector('.section-title');
+        if (titleEl) titleEl.appendChild(label);
       });
+    } else {
+      // Load profiles for paid users
+      loadManageProfiles();
     }
   });
 
@@ -116,9 +125,22 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       if (token) {
         checkAccountStatus();
+        // Refresh tier cache so popup shows correct tier immediately
+        refreshTierFromOptions();
       }
     });
   });
+
+  function refreshTierFromOptions() {
+    ensureAuthenticated().then(function (auth) {
+      return getUserTier(auth.idToken, auth.firebaseUid);
+    }).then(function (tier) {
+      chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
+      console.log('[Options] Tier refreshed:', tier);
+    }).catch(function (e) {
+      console.log('[Options] Tier refresh failed:', e.message || e);
+    });
+  }
 
   // ─── Sign out ─────────────────────────────────────────────────────────────
   signOutBtn.addEventListener('click', function () {
@@ -252,5 +274,144 @@ document.addEventListener('DOMContentLoaded', function () {
     var div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // ─── Manage Profiles ──────────────────────────────────────────────────────
+
+  function loadManageProfiles() {
+    if (!manageProfilesList) return;
+
+    manageProfilesList.innerHTML = '<div class="manage-profiles-empty">Loading profiles...</div>';
+
+    ensureAuthenticated().then(function (auth) {
+      return listProfilesFromFirestore(auth.userId, auth.idToken, auth.firebaseUid).then(function (profiles) {
+        renderManageProfiles(profiles, auth);
+      });
+    }).catch(function (err) {
+      console.log('[Options] Failed to load profiles:', err);
+      manageProfilesList.innerHTML = '<div class="manage-profiles-empty">Sign in to manage profiles.</div>';
+    });
+  }
+
+  function renderManageProfiles(profiles, auth) {
+    if (!manageProfilesList) return;
+
+    if (!profiles || profiles.length === 0) {
+      manageProfilesList.innerHTML = '<div class="manage-profiles-empty">No profiles yet. Create one from the popup.</div>';
+      return;
+    }
+
+    manageProfilesList.innerHTML = '';
+
+    for (var i = 0; i < profiles.length; i++) {
+      (function (profile) {
+        var row = document.createElement('div');
+        row.className = 'manage-profile-row';
+
+        // Badge
+        var colour = PROFILE_COLOURS[profile.colourIndex] || PROFILE_COLOURS[0];
+        var badge = document.createElement('div');
+        badge.className = 'profile-badge';
+        badge.style.background = colour.bg;
+        badge.style.border = '1.5px solid ' + colour.swatch;
+
+        if (profile.icon === 'portility') {
+          var img = document.createElement('img');
+          img.src = 'icons/logo-circle.png';
+          img.alt = 'Portility';
+          badge.appendChild(img);
+        } else {
+          var icon = document.createElement('i');
+          icon.className = 'ti ' + profile.icon;
+          icon.style.color = colour.icon;
+          badge.appendChild(icon);
+        }
+        row.appendChild(badge);
+
+        // Info
+        var info = document.createElement('div');
+        info.className = 'manage-profile-info';
+
+        var nameInput = document.createElement('input');
+        nameInput.className = 'manage-profile-name';
+        nameInput.type = 'text';
+        nameInput.value = profile.name;
+        nameInput.maxLength = 30;
+        nameInput.title = 'Click to rename';
+        info.appendChild(nameInput);
+
+        var typeLabel = document.createElement('div');
+        typeLabel.className = 'manage-profile-type';
+        typeLabel.textContent = profile.type;
+        info.appendChild(typeLabel);
+
+        row.appendChild(info);
+
+        // Actions
+        var actions = document.createElement('div');
+        actions.className = 'manage-profile-actions';
+
+        // Default radio
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'defaultProfile';
+        radio.className = 'manage-profile-default-radio';
+        radio.checked = !!profile.isDefault;
+        radio.title = 'Set as default';
+
+        radio.addEventListener('change', function () {
+          if (!this.checked) return;
+          setDefaultProfile(profile.id, auth.userId, auth.idToken, auth.firebaseUid).then(function () {
+            loadManageProfiles();
+          }).catch(function (err) {
+            console.log('[Options] Failed to set default:', err);
+          });
+        });
+        actions.appendChild(radio);
+
+        // Delete button
+        var delBtn = document.createElement('button');
+        delBtn.className = 'manage-profile-delete-btn';
+        delBtn.innerHTML = '&times;';
+        delBtn.title = 'Delete profile';
+        delBtn.disabled = profiles.length <= 1;
+
+        delBtn.addEventListener('click', function () {
+          if (profiles.length <= 1) return;
+          if (!confirm('Delete "' + profile.name + '"?')) return;
+
+          deleteProfileFromFirestore(profile.id, auth.idToken, auth.firebaseUid).then(function () {
+            loadManageProfiles();
+          }).catch(function (err) {
+            console.log('[Options] Failed to delete profile:', err);
+          });
+        });
+        actions.appendChild(delBtn);
+
+        row.appendChild(actions);
+
+        // Inline rename on blur/Enter
+        nameInput.addEventListener('blur', function () {
+          var newName = this.value.trim();
+          if (!newName || newName === profile.name) {
+            this.value = profile.name;
+            return;
+          }
+          profile.name = newName;
+          saveProfileToFirestore(profile, auth.userId, auth.idToken, auth.firebaseUid).catch(function (err) {
+            console.log('[Options] Failed to rename profile:', err);
+          });
+        });
+
+        nameInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.blur();
+          }
+        });
+
+        manageProfilesList.appendChild(row);
+      })(profiles[i]);
+    }
   }
 });
