@@ -200,3 +200,98 @@ h1 {
   color: #9ca3af;
   margin-left: 6px;
 }
+
+/* ── SO History ─────────────────────────────────────────────────── */
+.so-history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.so-history-empty {
+  font-size: 12px;
+  color: #9ca3af;
+  padding: 8px 0;
+}
+
+.so-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.so-history-row:last-child {
+  border-bottom: none;
+}
+
+.so-history-date {
+  font-size: 12px;
+  color: #6b7280;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.so-history-platform {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  justify-content: center;
+}
+
+.so-history-platform svg {
+  display: block;
+}
+
+.so-history-score {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.so-score-conflict {
+  background: #FEE2E2;
+  color: #A93226;
+}
+
+.so-score-mixed {
+  background: #FEF9C3;
+  color: #B7950B;
+}
+
+.so-score-agrees {
+  background: #DCFCE7;
+  color: #1E8449;
+}
+
+.so-history-type {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 0.5px solid;
+  flex-shrink: 0;
+}
+
+.so-type-factual {
+  background: #E6F1FB;
+  color: #185FA5;
+  border-color: #B5D4F4;
+}
+
+.so-type-subjective {
+  background: #EEEDFE;
+  color: #534AB7;
+  border-color: #CECBF6;
+}
+
+.so-type-analytical {
+  background: #E1F5EE;
+  color: #0F6E56;
+  border-color: #9FE1CB;
+}

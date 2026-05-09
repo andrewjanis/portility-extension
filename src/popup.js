@@ -1677,6 +1677,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     secondOpinionBtn.disabled = true;
     showDialLoading('Reading conversation\u2026');
+    var _soStartTime = Date.now();
 
     try {
       // Step 1: Get active tab and detect platform
@@ -1780,13 +1781,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Step 7: Pass to results UI (Task 14)
       showSecondOpinionResults({
+        originalBrief: artifact,
         secondOpinion: soData.text,
         source: soData.source,
         platform: platform,
         comparison: compareData,
+        durationMs: Date.now() - _soStartTime,
       });
 
     } catch (err) {
+      stopSuggestionCycle();
       soResultsEl.classList.remove('so-loading');
       soResultsEl.style.display = 'none';
       screen1.style.display = 'block';
@@ -1802,18 +1806,20 @@ document.addEventListener('DOMContentLoaded', () => {
   var soBackBtn = document.getElementById('soBackBtn');
   var soModelName = document.getElementById('so-model-name');
   var soViewFullBtn = document.getElementById('soViewFullBtn');
+  var soRateBtn = document.getElementById('soRateBtn');
   var _soCurrentScore = 0;
   var _soAnimFrame;
   var _soFullText = '';
+  var _soResultData = null;
 
   function soZoneId(score) {
     return score < 34 ? 'conflict' : score < 67 ? 'mixed' : 'agrees';
   }
 
   function soZoneColors(score) {
-    if (score < 34) return { text: '#c43030', needle: '#E24B4A' };
-    if (score < 67) return { text: '#a07800', needle: '#c9a000' };
-    return { text: '#059618', needle: '#09d624' };
+    if (score < 34) return { text: '#A93226', needle: '#C0392B' };
+    if (score < 67) return { text: '#B7950B', needle: '#D4AC0D' };
+    return { text: '#1E8449', needle: '#27AE60' };
   }
 
   function soTypeColors(questionType) {
@@ -1905,12 +1911,96 @@ document.addEventListener('DOMContentLoaded', () => {
     // Store full text for "View full comparison"
     _soFullText = data.secondOpinion || '';
 
+    // Store full result data for rating page
+    _soResultData = {
+      originalBrief: data.originalBrief || '',
+      secondOpinion: data.secondOpinion || '',
+      source: data.source || '',
+      platform: data.platform || '',
+      comparison: data.comparison || {},
+    };
+
+    // Persist for history + ML training
+    var durationMs = data.durationMs || 0;
+    try {
+      saveSOComparison({
+        originalBrief: data.originalBrief || '',
+        secondOpinion: data.secondOpinion || '',
+        source: data.source || '',
+        platform: data.platform || '',
+        comparison: data.comparison || {},
+        durationMs: durationMs,
+      });
+    } catch (e) {
+      console.log('[SecondOpinion] Failed to save to history:', e);
+    }
+
+    trackEvent('second_opinion_completed', {
+      platform: data.platform,
+      source: data.source,
+      aiScore: score,
+      questionType: questionType,
+      durationMs: durationMs,
+      durationSec: Math.round(durationMs / 1000),
+    });
+
     // Transition from loading to results
+    stopSuggestionCycle();
     soResultsEl.classList.remove('so-loading');
     document.getElementById('so-status-text').textContent = '';
     setStatus('');
     screen1.style.display = 'none';
     soResultsEl.style.display = 'block';
+  }
+
+  // ── While-you-wait suggestions ──────────────────────────────────────────────
+  var _soWaitSuggestions = [
+    'Take 3 slow, deep breaths.',
+    'Close your eyes for 10 seconds.',
+    'Stand up and stretch your arms overhead.',
+    'Roll your shoulders back 5 times.',
+    'Look away from the screen at something far away.',
+    'Drink some water — stay hydrated!',
+    'Unclench your jaw and relax your face.',
+    'Wiggle your fingers and toes.',
+    'Sit up straight and fix your posture.',
+    'Take a big breath in through your nose, out through your mouth.',
+    'Give your eyes a break — blink 10 times slowly.',
+    'Squeeze your hands into fists, then release.',
+    'Drop your shoulders away from your ears.',
+    'Smile — even a fake one boosts your mood.',
+    'Put your feet flat on the floor and feel grounded.',
+  ];
+  var _soSuggestionTimer = null;
+
+  function startSuggestionCycle() {
+    var noteEl = document.getElementById('so-timing-note');
+    var pool = _soWaitSuggestions.slice();
+    // Shuffle
+    for (var i = pool.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    var idx = 0;
+    function show() {
+      noteEl.classList.remove('fade-out');
+      noteEl.textContent = 'While you wait\u2026 ' + pool[idx % pool.length];
+      idx++;
+    }
+    show();
+    _soSuggestionTimer = setInterval(function () {
+      noteEl.classList.add('fade-out');
+      setTimeout(function () {
+        show();
+      }, 400);
+    }, 6000);
+  }
+
+  function stopSuggestionCycle() {
+    if (_soSuggestionTimer) {
+      clearInterval(_soSuggestionTimer);
+      _soSuggestionTimer = null;
+    }
   }
 
   function showDialLoading(statusText) {
@@ -1932,6 +2022,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add loading class for pulse + hide lists
     soResultsEl.classList.add('so-loading');
 
+    // Start rotating suggestions
+    startSuggestionCycle();
+
     // Show the results screen
     screen1.style.display = 'none';
     soResultsEl.style.display = 'block';
@@ -1952,7 +2045,195 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.create({ url: url });
   });
 
+  // ── Rating page ─────────────────────────────────────────────────────────────
+  function buildRatingPageHtml(resultData, authData) {
+    var score = Math.round((resultData.comparison && resultData.comparison.agreement_score) || 0);
+    var zone = score < 34 ? 'Conflict' : score < 67 ? 'Mixed' : 'Agrees';
+    var zoneColor = score < 34 ? '#A93226' : score < 67 ? '#B7950B' : '#1E8449';
+
+    var escaped = JSON.stringify({
+      originalBrief: resultData.originalBrief,
+      secondOpinion: resultData.secondOpinion,
+      source: resultData.source,
+      platform: resultData.platform,
+      comparison: resultData.comparison,
+      idToken: authData.idToken,
+      firebaseUid: authData.firebaseUid,
+    });
+
+    return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+      '<title>Rate This Comparison — Portility</title>' +
+      '<style>' +
+        '*{box-sizing:border-box;margin:0;padding:0}' +
+        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#f9fafb;color:#111;padding:0}' +
+        '.header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px;display:flex;align-items:center;justify-content:space-between}' +
+        '.header h1{font-size:20px;font-weight:700;color:#111}' +
+        '.score-badge{display:inline-block;font-size:14px;font-weight:600;padding:6px 16px;border-radius:20px;background:' + (score < 34 ? '#fef2f2' : score < 67 ? '#fffbeb' : '#f0fdf4') + ';color:' + zoneColor + ';border:1px solid ' + (score < 34 ? '#fecaca' : score < 67 ? '#fde68a' : '#bbf7d0') + '}' +
+        '.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px 32px;max-width:1200px;margin:0 auto}' +
+        '.column{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;max-height:400px;overflow-y:auto}' +
+        '.column h2{font-size:14px;font-weight:700;color:#374151;margin-bottom:12px;position:sticky;top:0;background:#fff;padding-bottom:8px;border-bottom:1px solid #f3f4f6}' +
+        '.col-body{font-size:13px;color:#4b5563;line-height:1.7}' +
+        '.col-body p{margin-bottom:10px}' +
+        '.col-body ul,.col-body ol{margin:0 0 10px 20px}' +
+        '.col-body li{margin-bottom:4px}' +
+        '.col-body h3{font-size:13px;font-weight:700;color:#374151;margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.03em}' +
+        '.col-body strong{color:#374151}' +
+        '.col-body code{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;font-family:monospace}' +
+        '.col-body pre{background:#f3f4f6;padding:10px 12px;border-radius:6px;font-size:12px;font-family:monospace;overflow-x:auto;margin-bottom:10px;white-space:pre-wrap;word-wrap:break-word}' +
+        '.col-body blockquote{border-left:3px solid #d1d5db;padding-left:12px;margin:0 0 10px;color:#6b7280;font-style:italic}' +
+        '.rating-section{max-width:1200px;margin:0 auto;padding:0 32px 40px}' +
+        '.rating-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px}' +
+        '.rating-card h3{font-size:15px;font-weight:600;color:#111;margin-bottom:16px}' +
+        '.rating-buttons{display:flex;gap:12px;margin-bottom:20px}' +
+        '.rating-btn{padding:10px 28px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}' +
+        '.rating-btn:hover{border-color:#14b8a6;color:#0d9488}' +
+        '.rating-btn.selected{background:#f0fdfa;border-color:#14b8a6;color:#0d9488}' +
+        '.rating-btn.selected-high{background:#f0fdf4;border-color:#22c55e;color:#15803d}' +
+        '.rating-btn.selected-medium{background:#fffbeb;border-color:#f59e0b;color:#92400e}' +
+        '.rating-btn.selected-low{background:#fef2f2;border-color:#ef4444;color:#dc2626}' +
+        'textarea{width:100%;height:80px;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;color:#111;transition:border-color 0.2s}' +
+        'textarea:focus{outline:none;border-color:#14b8a6;box-shadow:0 0 0 3px rgba(20,184,166,0.1)}' +
+        'textarea::placeholder{color:#9ca3af}' +
+        '.submit-btn{margin-top:16px;padding:10px 32px;background:linear-gradient(135deg,#14b8a6,#4ade80);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:box-shadow 0.2s,transform 0.15s}' +
+        '.submit-btn:hover:not(:disabled){box-shadow:0 4px 12px rgba(20,184,166,0.3);transform:translateY(-1px)}' +
+        '.submit-btn:disabled{opacity:0.5;cursor:not-allowed}' +
+        '.success-msg{display:none;margin-top:12px;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#15803d;font-size:13px;font-weight:600}' +
+        '.error-msg{display:none;margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#dc2626;font-size:13px}' +
+      '</style></head><body>' +
+      '<div class="header"><h1>Rate This Comparison</h1>' +
+      '<span class="score-badge">AI Score: ' + score + '% — ' + zone + '</span></div>' +
+      '<div class="columns">' +
+        '<div class="column"><h2>Original Brief</h2><div id="origText" class="col-body"></div></div>' +
+        '<div class="column"><h2>Second Opinion</h2><div id="soText" class="col-body"></div></div>' +
+      '</div>' +
+      '<div class="rating-section"><div class="rating-card">' +
+        '<h3>How would you rate the agreement between these?</h3>' +
+        '<div class="rating-buttons">' +
+          '<button class="rating-btn" data-rating="high">High</button>' +
+          '<button class="rating-btn" data-rating="medium">Medium</button>' +
+          '<button class="rating-btn" data-rating="low">Low</button>' +
+        '</div>' +
+        '<label style="font-size:13px;color:#374151;display:block;margin-bottom:6px">Why? (optional)</label>' +
+        '<textarea id="reasonInput" placeholder="Explain your reasoning..."></textarea>' +
+        '<button class="submit-btn" id="submitBtn" disabled>Submit Feedback</button>' +
+        '<div class="success-msg" id="successMsg">Thank you! Your feedback has been saved.</div>' +
+        '<div class="error-msg" id="errorMsg"></div>' +
+      '</div></div>' +
+      '<script id="soData" type="application/json">' + escaped + '<\/script>' +
+      '<script>' +
+        '(function(){' +
+          'var d=JSON.parse(document.getElementById("soData").textContent);' +
+          'function fmtText(str){' +
+            'var s=str||"";' +
+            // Escape HTML
+            's=s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");' +
+            // Code blocks (triple backtick)
+            's=s.replace(/```([\\s\\S]*?)```/g,function(_,c){return"<pre>"+c.trim()+"</pre>"});' +
+            // Inline code
+            's=s.replace(/`([^`]+)`/g,"<code>$1</code>");' +
+            // Bold
+            's=s.replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>");' +
+            // Headers (### or ##)
+            's=s.replace(/^###?\\s+(.+)$/gm,"<h3>$1</h3>");' +
+            // Bullet lists (- or *)
+            's=s.replace(/^(\\s*)[\\-\\*]\\s+(.+)$/gm,"<li>$2</li>");' +
+            's=s.replace(/(<li>.*<\\/li>\\n?)+/g,"<ul>$&</ul>");' +
+            // Numbered lists
+            's=s.replace(/^\\d+\\.\\s+(.+)$/gm,"<li>$1</li>");' +
+            // Blockquotes
+            's=s.replace(/^>\\s?(.+)$/gm,"<blockquote>$1</blockquote>");' +
+            // Paragraphs: split on double newlines
+            's=s.replace(/\\n{2,}/g,"</p><p>");' +
+            // Single newlines within a paragraph → <br>
+            's=s.replace(/\\n/g,"<br>");' +
+            's="<p>"+s+"</p>";' +
+            // Clean up empty paragraphs
+            's=s.replace(/<p><\\/p>/g,"");' +
+            's=s.replace(/<p>(<h3>)/g,"$1");' +
+            's=s.replace(/(<\\/h3>)<\\/p>/g,"$1");' +
+            's=s.replace(/<p>(<ul>)/g,"$1");' +
+            's=s.replace(/(<\\/ul>)<\\/p>/g,"$1");' +
+            's=s.replace(/<p>(<pre>)/g,"$1");' +
+            's=s.replace(/(<\\/pre>)<\\/p>/g,"$1");' +
+            's=s.replace(/<p>(<blockquote>)/g,"$1");' +
+            's=s.replace(/(<\\/blockquote>)<\\/p>/g,"$1");' +
+            'return s;' +
+          '}' +
+          'document.getElementById("origText").innerHTML=fmtText(d.originalBrief);' +
+          'document.getElementById("soText").innerHTML=fmtText(d.secondOpinion);' +
+          'var selected=null;' +
+          'var colorMap={high:"selected-high",medium:"selected-medium",low:"selected-low"};' +
+          'document.querySelectorAll(".rating-btn").forEach(function(btn){' +
+            'btn.addEventListener("click",function(){' +
+              'document.querySelectorAll(".rating-btn").forEach(function(b){b.className="rating-btn"});' +
+              'selected=btn.dataset.rating;' +
+              'btn.className="rating-btn "+colorMap[selected];' +
+              'document.getElementById("submitBtn").disabled=false;' +
+            '});' +
+          '});' +
+          'document.getElementById("submitBtn").addEventListener("click",function(){' +
+            'var btn=this;btn.disabled=true;btn.textContent="Saving...";' +
+            'var reason=document.getElementById("reasonInput").value.trim();' +
+            'var cmp=d.comparison||{};' +
+            'var score=Math.round(cmp.agreement_score||0);' +
+            'var docId=Date.now()+"-"+Math.random().toString(36).slice(2,8);' +
+            'var url="https://firestore.googleapis.com/v1/projects/portility/databases/(default)/documents/second_opinion_feedback/"+docId;' +
+            'var fields={' +
+              'firebaseUid:{stringValue:d.firebaseUid},' +
+              'platform:{stringValue:d.platform},' +
+              'comparisonModel:{stringValue:d.source},' +
+              'aiScore:{integerValue:String(score)},' +
+              'humanRating:{stringValue:selected},' +
+              'humanReason:{stringValue:reason},' +
+              'originalBrief:{stringValue:d.originalBrief},' +
+              'secondOpinion:{stringValue:d.secondOpinion},' +
+              'questionType:{stringValue:cmp.question_type||"analytical"},' +
+              'createdAt:{timestampValue:new Date().toISOString()}' +
+            '};' +
+            'fetch(url,{method:"PATCH",headers:{"Authorization":"Bearer "+d.idToken,"Content-Type":"application/json"},body:JSON.stringify({fields:fields})})' +
+            '.then(function(r){' +
+              'if(!r.ok)throw new Error("HTTP "+r.status);' +
+              'document.getElementById("successMsg").style.display="block";' +
+              'document.getElementById("errorMsg").style.display="none";' +
+              'btn.textContent="Submitted";' +
+              'document.querySelectorAll(".rating-btn").forEach(function(b){b.style.pointerEvents="none"});' +
+              // PostHog tracking
+              'fetch("' + POSTHOG_HOST + '/capture/",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({' +
+                'api_key:"' + POSTHOG_API_KEY + '",' +
+                'event:"second_opinion_feedback_submitted",' +
+                'distinct_id:d.firebaseUid,' +
+                'properties:{aiScore:score,humanRating:selected,hasReason:reason.length>0,platform:d.platform,$lib:"portility-extension"},' +
+                'timestamp:new Date().toISOString()' +
+              '}),keepalive:true}).catch(function(){});' +
+            '})' +
+            '.catch(function(e){' +
+              'document.getElementById("errorMsg").textContent="Failed to save: "+e.message;' +
+              'document.getElementById("errorMsg").style.display="block";' +
+              'btn.disabled=false;btn.textContent="Submit Feedback";' +
+            '});' +
+          '});' +
+        '})();<\/script>' +
+      '</body></html>';
+  }
+
+  soRateBtn.addEventListener('click', async function () {
+    if (!_soResultData) return;
+    try {
+      var auth = await ensureAuthenticated();
+      var html = buildRatingPageHtml(_soResultData, {
+        idToken: auth.idToken,
+        firebaseUid: auth.firebaseUid,
+      });
+      var blob = new Blob([html], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      chrome.tabs.create({ url: url });
+    } catch (e) {
+      console.error('[RatingPage] Failed to open:', e);
+    }
+  });
+
   soBackBtn.addEventListener('click', function () {
+    stopSuggestionCycle();
     soResultsEl.classList.remove('so-loading');
     soResultsEl.style.display = 'none';
     resetPopup();

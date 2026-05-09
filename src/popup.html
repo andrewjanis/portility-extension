@@ -490,6 +490,11 @@
       text-align: center;
       line-height: 1.4;
       margin-bottom: 12px;
+      transition: opacity 0.4s ease;
+    }
+
+    .so-timing-note.fade-out {
+      opacity: 0;
     }
 
     #soResults.so-loading #so-dial-svg {
@@ -596,10 +601,11 @@
          role="img" aria-label="Circle agreement gauge with gradient zones">
       <defs>
         <linearGradient id="soGaugeGrad" gradientUnits="userSpaceOnUse" x1="30" y1="115" x2="210" y2="115">
-          <stop offset="0%" stop-color="#E24B4A"/>
-          <stop offset="35%" stop-color="#f5ca0c"/>
-          <stop offset="65%" stop-color="#f5ca0c"/>
-          <stop offset="100%" stop-color="#09d624"/>
+          <stop offset="0%" stop-color="#C0392B"/>
+          <stop offset="25%" stop-color="#E67E22"/>
+          <stop offset="50%" stop-color="#F1C40F"/>
+          <stop offset="75%" stop-color="#7CB342"/>
+          <stop offset="100%" stop-color="#27AE60"/>
         </linearGradient>
         <clipPath id="soGaugeClip">
           <path d="M42.1,160 A90,90 0 0,1 197.9,160" fill="none" stroke="black" stroke-width="48"/>
@@ -630,9 +636,9 @@
       <circle cx="120" cy="115" r="90" fill="none" stroke="#e5e7eb" stroke-width="0.5"/>
 
       <!-- Zone labels -->
-      <text x="55"  y="108" font-size="11" font-weight="500" fill="#c43030" font-family="-apple-system,sans-serif" text-anchor="middle">Conflict</text>
-      <text x="120" y="50"  font-size="11" font-weight="500" fill="#a07800" font-family="-apple-system,sans-serif" text-anchor="middle">Mixed</text>
-      <text x="185" y="108" font-size="11" font-weight="500" fill="#059618" font-family="-apple-system,sans-serif" text-anchor="middle">Agrees</text>
+      <text x="55"  y="108" font-size="11" font-weight="500" fill="#A93226" font-family="-apple-system,sans-serif" text-anchor="middle">Conflict</text>
+      <text x="120" y="50"  font-size="11" font-weight="500" fill="#B7950B" font-family="-apple-system,sans-serif" text-anchor="middle">Mixed</text>
+      <text x="185" y="108" font-size="11" font-weight="500" fill="#1E8449" font-family="-apple-system,sans-serif" text-anchor="middle">Agrees</text>
 
       <!-- Hub — Portility logo -->
       <circle cx="120" cy="115" r="40" fill="#ffffff"/>
@@ -641,20 +647,20 @@
 
       <!-- Needle -->
       <g id="so-needle" style="transform-origin:120px 115px;transform:rotate(-120deg);transition:transform 0.9s cubic-bezier(0.34,1.2,0.64,1)">
-        <line id="so-needle-main" x1="120" y1="115" x2="120" y2="52" stroke="#E24B4A" stroke-width="2.5" stroke-linecap="round"/>
-        <line id="so-needle-tail" x1="120" y1="115" x2="120" y2="131" stroke="#E24B4A" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
+        <line id="so-needle-main" x1="120" y1="115" x2="120" y2="52" stroke="#C0392B" stroke-width="2.5" stroke-linecap="round"/>
+        <line id="so-needle-tail" x1="120" y1="115" x2="120" y2="131" stroke="#C0392B" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
       </g>
 
       <!-- Hub dot (above needle) -->
-      <circle id="so-hub-dot" cx="120" cy="115" r="6" fill="#E24B4A"/>
+      <circle id="so-hub-dot" cx="120" cy="115" r="6" fill="#C0392B"/>
       <circle cx="120" cy="115" r="2.5" fill="#ffffff"/>
 
       <!-- Score number -->
-      <text id="so-score-number" x="120" y="178" font-size="40" font-weight="500" fill="#c43030" font-family="-apple-system,sans-serif" text-anchor="middle" dominant-baseline="middle">—</text>
+      <text id="so-score-number" x="120" y="178" font-size="40" font-weight="500" fill="#A93226" font-family="-apple-system,sans-serif" text-anchor="middle" dominant-baseline="middle">—</text>
     </svg>
 
     <div id="so-status-text"></div>
-    <div class="so-timing-note">Second Opinion can take 20-30 seconds depending on the complexity of your request.</div>
+    <div class="so-timing-note" id="so-timing-note"></div>
     <div id="so-score-lbl"></div>
     <div id="so-interp"></div>
 
@@ -667,6 +673,7 @@
     <div class="so-footer">
       <div id="so-model-name" class="so-model-label"></div>
       <button id="soViewFullBtn" class="link-btn" style="font-size:10px;">View full comparison</button>
+      <button id="soRateBtn" class="link-btn" style="font-size:10px;">Rate this comparison</button>
     </div>
   </div>
 
