@@ -136,6 +136,15 @@ h1 {
 
 .disconnect-link:hover { color: #6b7280; }
 
+.drive-files-link {
+  font-size: 12px;
+  color: #14b8a6;
+  text-decoration: none;
+  margin-left: 10px;
+  cursor: pointer;
+}
+.drive-files-link:hover { text-decoration: underline; }
+
 /* ── Danger button ───────────────────────────────────────────────── */
 .btn-danger {
   padding: 8px 20px;

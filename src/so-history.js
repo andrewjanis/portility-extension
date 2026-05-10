@@ -19,6 +19,26 @@
     return div.innerHTML;
   }
 
+  /**
+   * Generate a 2-4 word topic title from the original conversation brief.
+   */
+  function deriveTitle(originalBrief) {
+    if (!originalBrief) return 'Comparison';
+    // Get first meaningful line (skip empty lines and role labels like "User:" / "Assistant:")
+    var lines = originalBrief.split(/\n/).filter(function (l) { return l.trim().length > 0; });
+    var line = (lines[0] || '').trim();
+    // Strip role prefixes
+    line = line.replace(/^(user|assistant|human|ai|you|me)\s*:\s*/i, '');
+    // Strip common question starters to get to the topic
+    line = line.replace(/^(can you |could you |what is |what are |what's |how much |how many |how do |how does |how to |tell me about |explain |is there |are there |do you know |i need |i want |please )/i, '');
+    // Take first 2-4 words as the topic
+    var words = line.split(/\s+/).slice(0, 4);
+    var title = words.join(' ').replace(/[.,;:!?"'?]+$/, '');
+    if (title.length > 30) title = title.substring(0, 27) + '...';
+    if (!title) return 'Comparison';
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  }
+
   function formatDate(isoString) {
     if (!isoString) return '\u2014';
     var d = new Date(isoString);
@@ -65,11 +85,14 @@
         summary = summary.substring(0, 197) + '...';
       }
 
+      var title = deriveTitle(item.originalBrief);
+
       return '<div class="history-item">' +
         '<div class="history-top">' +
-          '<span class="history-ais">' + aiLabel + '</span>' +
+          '<span class="history-title">' + escHtml(title) + '</span>' +
           '<span class="history-date">' + escHtml(formatDate(item.createdAt)) + '</span>' +
         '</div>' +
+        '<div class="history-ais">' + aiLabel + '</div>' +
         '<div class="history-summary">' + escHtml(summary) + '</div>' +
         '<div class="history-meta">' +
           '<span class="score-pill ' + scoreClass + '">' + score + '% ' + scoreLabel + '</span>' +

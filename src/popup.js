@@ -279,7 +279,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const profilePicker = document.getElementById('profilePicker');
   const profilePickerBackBtn = document.getElementById('profilePickerBackBtn');
   const profileList = document.getElementById('profileList');
-  const profileBuildBtn = document.getElementById('profileBuildBtn');
   const profileNewBtn = document.getElementById('profileNewBtn');
   const profileNewBlocked = document.getElementById('profileNewBlocked');
   const profilePickerStatus = document.getElementById('profilePickerStatus');
@@ -1033,13 +1032,22 @@ document.addEventListener('DOMContentLoaded', () => {
         item.appendChild(pill);
       }
 
-      // Click to select
+      // Click to port with this profile immediately
       (function (profile) {
-        item.addEventListener('click', function () {
+        item.addEventListener('click', async function () {
           var items = profileList.querySelectorAll('.profile-list-item');
           for (var j = 0; j < items.length; j++) { items[j].classList.remove('selected'); }
           this.classList.add('selected');
           _selectedProfileForPort = profile;
+
+          trackEvent('portme_pro_profile_selected', { profileId: profile.id, profileType: profile.type });
+          try {
+            var auth = await ensureAuthenticated();
+            await portWithProfile(profile, auth);
+          } catch (err) {
+            profilePickerStatus.textContent = err.message || 'Something went wrong.';
+            profilePickerStatus.className = 'profile-picker-status error';
+          }
         });
       })(p);
 
@@ -1556,31 +1564,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showProfileScreen('profileCustomize');
   });
 
-  // "Build your Pro profile" button in picker — port with selected profile
-  profileBuildBtn.addEventListener('click', async function () {
-    if (!_selectedProfileForPort) {
-      profilePickerStatus.textContent = 'Select a profile first.';
-      profilePickerStatus.className = 'profile-picker-status error';
-      return;
-    }
-
-    crumb('profile_build_tapped', { profileId: _selectedProfileForPort.id });
-    trackEvent('portme_pro_build_tapped', { profileId: _selectedProfileForPort.id, profileType: _selectedProfileForPort.type });
-
-    try {
-      profileBuildBtn.disabled = true;
-      profileBuildBtn.textContent = 'Loading\u2026';
-      var auth = await ensureAuthenticated();
-      trackEvent('portme_pro_profile_selected', { profileId: _selectedProfileForPort.id, profileType: _selectedProfileForPort.type });
-      await portWithProfile(_selectedProfileForPort, auth);
-    } catch (err) {
-      profilePickerStatus.textContent = err.message || 'Something went wrong.';
-      profilePickerStatus.className = 'profile-picker-status error';
-    } finally {
-      profileBuildBtn.disabled = false;
-      profileBuildBtn.textContent = 'Build your Pro profile';
-    }
-  });
+  // Profile build button removed — profile click now advances directly to destination picker.
 
   // "+ New Profile" button in picker
   profileNewBtn.addEventListener('click', function () {
@@ -1845,6 +1829,10 @@ document.addEventListener('DOMContentLoaded', () => {
           trackEvent('operating_instructions_saved', { destination: 'file' });
         } else {
           await writeClipboard(_decryptedInstructions);
+          // Store text for auto-paste + auto-submit on destination tab
+          await new Promise(function (resolve) {
+            chrome.storage.local.set({ portility_pending_paste: _decryptedInstructions }, resolve);
+          });
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
           setScreen2Status('Instructions copied \u2014 paste them in the new tab!');
           crumb('instr_ported', { dest: destination });
@@ -2588,6 +2576,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!compareResp.ok) throw new Error(compareData.error || 'Comparison request failed');
 
       // Step 7: Pass to results UI (Task 14)
+      soNewBtn.style.display = 'none';
       showSecondOpinionResults({
         originalBrief: artifact,
         secondOpinion: soData.text,
@@ -2615,19 +2604,31 @@ document.addEventListener('DOMContentLoaded', () => {
   var soModelName = document.getElementById('so-model-name');
   var soViewFullBtn = document.getElementById('soViewFullBtn');
   var soRateBtn = document.getElementById('soRateBtn');
+  var soNewBtn = document.getElementById('soNewBtn');
   var _soCurrentScore = 0;
   var _soAnimFrame;
   var _soFullText = '';
   var _soResultData = null;
+  var SO_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  // Check for cached SO result on popup open
+  chrome.storage.local.get('so_cached_result', function (result) {
+    var cached = result.so_cached_result;
+    if (cached && cached.data && cached.timestamp && (Date.now() - cached.timestamp < SO_CACHE_TTL)) {
+      // Restore the cached results
+      showSecondOpinionResults(cached.data);
+      soNewBtn.style.display = 'inline';
+    }
+  });
 
   function soZoneId(score) {
     return score < 34 ? 'conflict' : score < 67 ? 'mixed' : 'agrees';
   }
 
   function soZoneColors(score) {
-    if (score < 34) return { text: '#A93226', needle: '#C0392B' };
-    if (score < 67) return { text: '#B7950B', needle: '#D4AC0D' };
-    return { text: '#1E8449', needle: '#27AE60' };
+    if (score < 34) return { text: '#DC2626', needle: '#DC2626' };
+    if (score < 67) return { text: '#F97316', needle: '#F97316' };
+    return { text: '#0D9488', needle: '#14B8A6' };
   }
 
   function soTypeColors(questionType) {
@@ -2658,10 +2659,151 @@ document.addEventListener('DOMContentLoaded', () => {
     })(t0);
   }
 
+  /**
+   * Split a comparison point into a short descriptive topic title and the rest.
+   */
+  function soSplitTitleBody(text) {
+    if (!text) return { title: 'Point', summary: '' };
+    // Strip common AI-analysis preambles to get to the substance
+    var body = text;
+    var preambles = [
+      /^both\s+(recognize|acknowledge|note|agree|identify|highlight|mention|discuss|address|cover|provide|include|present|focus|emphasize)\s+(that|the|on|how|a)?\s*:?\s*/i,
+      /^(response [AB]|they both|each response|the responses?|both AIs?|both models?)\s+(recognize|acknowledge|note|agree|identify|highlight|mention|discuss|address|present|focus|emphasize)s?\s+(that|the|on|how|a)?\s*:?\s*/i,
+      /^(response [AB])\s+(presents?|focuses?|covers?|provides?|includes?|discusses?|emphasizes?)\s*:?\s*/i,
+    ];
+    for (var i = 0; i < preambles.length; i++) {
+      body = body.replace(preambles[i], '');
+    }
+    // Extract topic: take first 2-3 meaningful words as the title
+    // Look for a natural break (comma, dash, period, "while", "and", "but", "with")
+    var breakMatch = body.match(/^(.{8,35?}?)(?:\s*[,\-\u2014]\s|\s+(?:while|and then|but|with|including|between|from|versus|vs)\s)/i);
+    var titleText;
+    if (breakMatch) {
+      titleText = breakMatch[1].trim();
+    } else {
+      var words = body.split(/\s+/).slice(0, 3);
+      titleText = words.join(' ');
+    }
+    titleText = titleText.replace(/[.,;:!?]+$/, '');
+    // Capitalize first letter
+    titleText = titleText.charAt(0).toUpperCase() + titleText.slice(1);
+    return { title: titleText, summary: text };
+  }
+
+  /**
+   * Find relevant quotes from each AI's response matching a topic keyword.
+   */
+  function soFindQuotes(data, topic) {
+    var keywords = topic.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3; });
+    if (keywords.length === 0) return '';
+
+    function findRelevant(text) {
+      if (!text) return '';
+      var sentences = text.split(/[.!?\n]+/).filter(function (s) { return s.trim().length > 10; });
+      for (var i = 0; i < sentences.length; i++) {
+        var lower = sentences[i].toLowerCase();
+        for (var k = 0; k < keywords.length; k++) {
+          if (lower.indexOf(keywords[k]) !== -1) {
+            var s = sentences[i].trim();
+            if (s.length > 120) s = s.substring(0, 117) + '...';
+            return s;
+          }
+        }
+      }
+      return '';
+    }
+
+    var platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+    var origName = platformNames[data.platform] || data.platform || 'AI 1';
+    var secName = platformNames[data.source] || data.source || 'AI 2';
+
+    var q1 = findRelevant(data.originalBrief);
+    var q2 = findRelevant(data.secondOpinion);
+
+    var html = '';
+    if (q1) html += '<div class="so-row-quote"><strong>' + escHtml(origName) + ':</strong> "' + escHtml(q1) + '"</div>';
+    if (q2) html += '<div class="so-row-quote"><strong>' + escHtml(secName) + ':</strong> "' + escHtml(q2) + '"</div>';
+    if (!html) html = '<div class="so-row-quote" style="color:#bbb;">No matching quotes found.</div>';
+    return html;
+  }
+
+  /**
+   * Find the most relevant sentence from a text block matching topic keywords.
+   * Returns a plain string (for use in the comparison table).
+   */
+  function soFindRelevantQuote(text, topic) {
+    if (!text || !topic) return '';
+    var keywords = topic.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3; });
+    if (keywords.length === 0) return '';
+    var sentences = text.split(/[.!?\n]+/).filter(function (s) { return s.trim().length > 15; });
+    var best = '';
+    var bestScore = 0;
+    for (var i = 0; i < sentences.length; i++) {
+      var lower = sentences[i].toLowerCase();
+      var score = 0;
+      for (var k = 0; k < keywords.length; k++) {
+        if (lower.indexOf(keywords[k]) !== -1) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = sentences[i].trim();
+      }
+    }
+    if (!best) return '';
+    // Strip markdown formatting
+    best = best.replace(/\*\*/g, '').replace(/^#+\s*/, '').replace(/^[-*]\s+/, '');
+    if (best.length > 180) best = best.substring(0, 177) + '...';
+    return best;
+  }
+
   function escHtml(str) {
     var d = document.createElement('div');
     d.textContent = str || '';
     return d.innerHTML;
+  }
+
+  /**
+   * Convert markdown text to formatted HTML for display.
+   */
+  function fmtMarkdown(str) {
+    var s = str || '';
+    // Escape HTML
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Code blocks (triple backtick)
+    s = s.replace(/```([\s\S]*?)```/g, function (_, c) { return '<pre>' + c.trim() + '</pre>'; });
+    // Inline code
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // H2 headers
+    s = s.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    // H3 headers
+    s = s.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    // H4 headers
+    s = s.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+    // Bullet lists (- or *)
+    s = s.replace(/^(\s*)[\-\*]\s+(.+)$/gm, '<li>$2</li>');
+    s = s.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    // Numbered lists
+    s = s.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+    // Blockquotes
+    s = s.replace(/^>\s?(.+)$/gm, '<blockquote>$1</blockquote>');
+    // Paragraphs: split on double newlines
+    s = s.replace(/\n{2,}/g, '</p><p>');
+    // Single newlines → <br>
+    s = s.replace(/\n/g, '<br>');
+    s = '<p>' + s + '</p>';
+    // Clean up empty/nested paragraphs around block elements
+    s = s.replace(/<p><\/p>/g, '');
+    s = s.replace(/<p>(<h[234]>)/g, '$1');
+    s = s.replace(/(<\/h[234]>)<\/p>/g, '$1');
+    s = s.replace(/<p>(<ul>)/g, '$1');
+    s = s.replace(/(<\/ul>)<\/p>/g, '$1');
+    s = s.replace(/<p>(<pre>)/g, '$1');
+    s = s.replace(/(<\/pre>)<\/p>/g, '$1');
+    s = s.replace(/<p>(<blockquote>)/g, '$1');
+    s = s.replace(/(<\/blockquote>)<\/p>/g, '$1');
+    return s;
   }
 
   function showSecondOpinionResults(data) {
@@ -2703,14 +2845,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Agreements
     document.getElementById('so-agree-list').innerHTML =
       (cmp.agreements || []).map(function (a) {
-        return '<div class="so-list-row" style="border-color:#C0DD97">' + escHtml(a) + '</div>';
+        var parts = soSplitTitleBody(a);
+        return '<div class="so-list-row" style="border-color:#C0DD97">' +
+          '<span class="so-row-title">' + escHtml(parts.title) + ':</span> ' + escHtml(parts.summary) +
+          '<div class="so-row-body">' + soFindQuotes(data, parts.title) + '</div>' +
+        '</div>';
       }).join('');
 
     // Divergences
     document.getElementById('so-diff-list').innerHTML =
       (cmp.divergences || []).map(function (d) {
-        return '<div class="so-list-row" style="border-color:#F7C1C1">' + escHtml(d) + '</div>';
+        var parts = soSplitTitleBody(d);
+        return '<div class="so-list-row" style="border-color:#F7C1C1">' +
+          '<span class="so-row-title">' + escHtml(parts.title) + ':</span> ' + escHtml(parts.summary) +
+          '<div class="so-row-body">' + soFindQuotes(data, parts.title) + '</div>' +
+        '</div>';
       }).join('');
+
+    // Wire expand/collapse on list rows
+    document.querySelectorAll('.so-list-row').forEach(function (row) {
+      row.addEventListener('click', function () { this.classList.toggle('expanded'); });
+    });
 
     // Model name for footer
     var modelMap = { chatgpt: 'GPT-4o', claude: 'Claude Sonnet 4.6' };
@@ -2759,6 +2914,20 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('');
     screen1.style.display = 'none';
     soResultsEl.style.display = 'block';
+
+    // Cache results for 5-minute persistence
+    chrome.storage.local.set({
+      so_cached_result: {
+        data: {
+          originalBrief: data.originalBrief || '',
+          secondOpinion: data.secondOpinion || '',
+          source: data.source || '',
+          platform: data.platform || '',
+          comparison: data.comparison || {},
+        },
+        timestamp: Date.now(),
+      }
+    });
   }
 
   // ── While-you-wait suggestions ──────────────────────────────────────────────
@@ -2847,8 +3016,69 @@ document.addEventListener('DOMContentLoaded', () => {
   window._testSO = showSecondOpinionResults;
 
   soViewFullBtn.addEventListener('click', function () {
-    if (!_soFullText) return;
-    var blob = new Blob([_soFullText], { type: 'text/html' });
+    if (!_soResultData) return;
+    var rd = _soResultData;
+    var cmp = rd.comparison || {};
+    var platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+    var ai1Name = platformNames[rd.platform] || rd.platform || 'AI 1';
+    var ai2Name = platformNames[rd.source] || rd.source || 'AI 2';
+
+    // Combine agreements + divergences into themes (max 5)
+    var allPoints = [];
+    (cmp.agreements || []).forEach(function (a) { allPoints.push({ text: a, type: 'agree' }); });
+    (cmp.divergences || []).forEach(function (d) { allPoints.push({ text: d, type: 'differ' }); });
+    var themes = allPoints.slice(0, 5);
+
+    // Build table rows
+    var rows = themes.map(function (item) {
+      var parts = soSplitTitleBody(item.text);
+      var q1 = soFindRelevantQuote(rd.originalBrief, parts.title);
+      var q2 = soFindRelevantQuote(rd.secondOpinion, parts.title);
+      var tagColor = item.type === 'agree' ? '#16a34a' : '#dc2626';
+      var tagBg = item.type === 'agree' ? '#f0fdf4' : '#fef2f2';
+      var tagLabel = item.type === 'agree' ? 'Agree' : 'Differ';
+      return '<tr>' +
+        '<td class="theme-cell"><strong>' + escHtml(parts.title) + '</strong>' +
+          '<span class="theme-tag" style="color:' + tagColor + ';background:' + tagBg + '">' + tagLabel + '</span>' +
+          '<div class="theme-desc">' + escHtml(parts.summary) + '</div></td>' +
+        '<td class="quote-cell"><div class="quote-text">' + escHtml(q1 || 'No specific mention found.') + '</div></td>' +
+        '<td class="quote-cell"><div class="quote-text">' + escHtml(q2 || 'No specific mention found.') + '</div></td>' +
+      '</tr>';
+    }).join('');
+
+    var score = Math.round(cmp.agreement_score || 0);
+    var interpretation = cmp.interpretation || '';
+
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Second Opinion — Portility</title>' +
+      '<style>' +
+        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;max-width:900px;margin:0 auto;padding:32px 24px;color:#111;line-height:1.6}' +
+        'h1{font-size:20px;font-weight:700;margin-bottom:4px}' +
+        '.subtitle{font-size:13px;color:#6b7280;margin-bottom:20px}' +
+        '.summary{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#374151;line-height:1.6}' +
+        '.score-badge{display:inline-block;font-weight:700;font-size:13px;padding:3px 10px;border-radius:20px;margin-right:8px}' +
+        'table{width:100%;border-collapse:collapse;margin-top:8px}' +
+        'thead th{text-align:left;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:2px solid #e5e7eb;background:#f9fafb}' +
+        'thead th.ai-col{width:30%}' +
+        'tbody tr{border-bottom:1px solid #f3f4f6}' +
+        'tbody tr:hover{background:#fafbfc}' +
+        '.theme-cell{padding:14px;vertical-align:top;width:40%}' +
+        '.theme-cell strong{font-size:14px;color:#111;display:block;margin-bottom:4px}' +
+        '.theme-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;display:inline-block;margin-bottom:6px}' +
+        '.theme-desc{font-size:12px;color:#6b7280;line-height:1.5}' +
+        '.quote-cell{padding:14px;vertical-align:top;font-size:13px;color:#374151;line-height:1.55}' +
+        '.quote-text{font-style:italic;color:#4b5563}' +
+      '</style></head><body>' +
+      '<h1>Comparison</h1>' +
+      '<div class="subtitle">Agreement score: ' + score + '%</div>' +
+      '<div class="summary">' + escHtml(interpretation) + '</div>' +
+      '<table><thead><tr>' +
+        '<th>Theme</th>' +
+        '<th class="ai-col">' + escHtml(ai1Name) + '</th>' +
+        '<th class="ai-col">' + escHtml(ai2Name) + '</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' +
+      '</body></html>';
+
+    var blob = new Blob([html], { type: 'text/html' });
     var url = URL.createObjectURL(blob);
     chrome.tabs.create({ url: url });
   });
@@ -3051,8 +3281,21 @@ document.addEventListener('DOMContentLoaded', () => {
     stopSuggestionCycle();
     soResultsEl.classList.remove('so-loading');
     soResultsEl.style.display = 'none';
+    soNewBtn.style.display = 'none';
+    chrome.storage.local.remove('so_cached_result');
     resetPopup();
     screen1.style.display = 'block';
+  });
+
+  soNewBtn.addEventListener('click', function () {
+    stopSuggestionCycle();
+    soResultsEl.classList.remove('so-loading');
+    soResultsEl.style.display = 'none';
+    soNewBtn.style.display = 'none';
+    chrome.storage.local.remove('so_cached_result');
+    resetPopup();
+    screen1.style.display = 'block';
+    triggerSecondOpinion();
   });
 
   secondOpinionBtn.addEventListener('click', function () {

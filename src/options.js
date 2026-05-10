@@ -41,6 +41,8 @@ document.addEventListener('DOMContentLoaded', function () {
       [backupSection, imageQualitySection].forEach(function (section) {
         if (!section) return;
         section.classList.add('locked');
+        var toggle = section.querySelector('input[type="checkbox"]');
+        if (toggle) toggle.checked = false;
         var label = document.createElement('span');
         label.className = 'paid-label';
         label.textContent = 'Paid feature';
@@ -52,10 +54,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ─── Load saved settings ──────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['portility_drive_backup_enabled', 'portility_compress_images'],
+    ['portility_drive_backup_enabled', 'portility_compress_images', 'userTier'],
     function (result) {
-      driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
-      compressToggle.checked = result.portility_compress_images !== false;
+      var tier = (result.userTier && result.userTier.tier) || 'free';
+      if (tier === 'paid') {
+        driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
+        compressToggle.checked = result.portility_compress_images !== false;
+      } else {
+        driveBackupToggle.checked = false;
+        compressToggle.checked = false;
+      }
 
       if (driveBackupToggle.checked) {
         checkDriveStatus();
@@ -234,6 +242,23 @@ document.addEventListener('DOMContentLoaded', function () {
   if (viewSOHistoryBtn) {
     viewSOHistoryBtn.addEventListener('click', function () {
       chrome.tabs.create({ url: chrome.runtime.getURL('so-history.html') });
+    });
+  }
+
+  // ─── See your files (Drive link) ─────────────────────────────────────────
+  var driveFilesLink = document.getElementById('driveFilesLink');
+  if (driveFilesLink) {
+    driveFilesLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      chrome.tabs.create({ url: 'https://drive.google.com/drive/search?q=Portility' });
+    });
+  }
+
+  // ─── Billing ────────────────────────────────────────────────────────────────
+  var manageBillingBtn = document.getElementById('manageBillingBtn');
+  if (manageBillingBtn) {
+    manageBillingBtn.addEventListener('click', function () {
+      chrome.tabs.create({ url: 'https://portility.app/billing' });
     });
   }
 

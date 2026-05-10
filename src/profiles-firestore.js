@@ -62,6 +62,12 @@ async function saveProfileToFirestore(profile, passphrase, idToken, firebaseUid)
     lastUpdated:  { timestampValue: now },
   };
 
+  // Store document if present
+  if (profile.document && profile.document.name) {
+    fields.documentName = { stringValue: profile.document.name };
+    fields.documentContent = { stringValue: profile.document.content || '' };
+  }
+
   var response = await fetch(url, {
     method: 'PATCH',
     headers: {
@@ -118,7 +124,16 @@ async function listProfilesFromFirestore(passphrase, idToken, firebaseUid) {
       createdAt:    f.createdAt?.timestampValue || null,
       lastUpdated:  f.lastUpdated?.timestampValue || null,
       answers:      null,
+      document:     null,
     };
+
+    // Read attached document
+    if (f.documentName?.stringValue) {
+      profile.document = {
+        name: f.documentName.stringValue,
+        content: f.documentContent?.stringValue || '',
+      };
+    }
 
     // Decrypt answers
     if (f.encryptedAnswers?.stringValue && f.salt?.stringValue && f.iv?.stringValue) {
@@ -143,6 +158,18 @@ async function listProfilesFromFirestore(passphrase, idToken, firebaseUid) {
     var bTime = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
     return bTime - aTime;
   });
+
+  // Ensure only one profile is marked as default (first default found wins)
+  var foundDefault = false;
+  for (var k = 0; k < profiles.length; k++) {
+    if (profiles[k].isDefault) {
+      if (foundDefault) {
+        profiles[k].isDefault = false;
+      } else {
+        foundDefault = true;
+      }
+    }
+  }
 
   return profiles;
 }

@@ -4,10 +4,14 @@
   <meta charset="utf-8">
   <title>Manage Port Me — Portility</title>
   <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css">
+  <link rel="stylesheet" href="styles/questionnaire.css">
+  <link rel="stylesheet" href="styles/profiles.css">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#f9fafb;color:#111;padding:0}
     .header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px}
+    .header-back{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#6b7280;text-decoration:none;margin-bottom:8px;cursor:pointer;background:none;border:none;font-family:inherit}
+    .header-back:hover{color:#0d9488}
     .header h1{font-size:20px;font-weight:700;color:#111}
     .header p{font-size:13px;color:#6b7280;margin-top:4px}
     .content{max-width:700px;margin:0 auto;padding:24px 32px}
@@ -23,13 +27,10 @@
     .profiles-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
     .profile-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;transition:box-shadow 0.15s}
     .profile-row:hover{box-shadow:0 1px 4px rgba(0,0,0,0.06)}
-    .profile-badge{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-    .profile-badge i{font-size:18px;line-height:1}
-    .profile-badge img{width:22px;height:22px;object-fit:cover;object-position:32% center;border-radius:4px}
     .profile-info{flex:1;min-width:0}
-    .profile-name-input{font-size:13px;font-weight:600;color:#111;border:none;background:transparent;padding:0;font-family:inherit;width:100%;cursor:pointer}
-    .profile-name-input:hover{color:#0d9488}
-    .profile-name-input:focus{outline:none;color:#0d9488;border-bottom:1px solid #14b8a6}
+    .profile-name-edit{font-size:13px;font-weight:600;color:#111;border:none;background:transparent;padding:0;font-family:inherit;width:100%;cursor:pointer}
+    .profile-name-edit:hover{color:#0d9488}
+    .profile-name-edit:focus{outline:none;color:#0d9488;border-bottom:1px solid #14b8a6}
     .profile-type-label{font-size:10px;color:#9ca3af;text-transform:capitalize}
     .profile-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
     .default-pill{font-size:9px;font-weight:600;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:20px;padding:2px 8px;white-space:nowrap}
@@ -43,10 +44,49 @@
     .status-msg.success{color:#16a34a}
     .locked-overlay{opacity:0.45;pointer-events:none;position:relative}
     .locked-label{font-size:11px;color:#9ca3af;font-weight:600;margin-bottom:8px}
+
+    /* Questionnaire overrides for full-page layout */
+    .q-screen{display:none}
+    .q-screen.active{display:block;max-height:none;overflow:visible;padding:0}
+    .q-option{font-size:13px;padding:10px 14px}
+    .q-section-title{font-size:15px}
+    .q-textarea{height:90px;font-size:13px}
+    .q-btn{max-width:300px}
+    #questionnaire-container{display:none}
+    #questionnaire-container.active{display:block}
+    .mq-actions{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:14px}
+    .mq-cancel-link{background:none;border:none;color:#9ca3af;font-size:12px;font-weight:500;cursor:pointer;padding:0;font-family:inherit}
+    .mq-cancel-link:hover{color:#6b7280;text-decoration:underline}
+
+    /* Profile creation overrides for full-page layout */
+    #newProfileFlow{display:none}
+    #newProfileFlow.active{display:block}
+    .np-screen{display:none}
+    .np-screen.active{display:block}
+    .profile-type-grid{max-width:400px}
+    .profile-type-card{padding:20px 12px}
+    .profile-icon-grid{max-width:400px}
+    .profile-colour-row{max-width:400px}
+    .profile-customize-preview{align-items:flex-start}
+    .profile-name-input{text-align:left;max-width:300px}
+    .profile-save-btn{max-width:300px}
+    .profile-customize-title{font-size:16px}
+
+    /* Document upload */
+    .doc-upload-area{margin-top:14px}
+    .doc-upload-label{font-size:11px;font-weight:700;color:#374151;margin-bottom:6px}
+    .doc-upload-row{display:flex;align-items:center;gap:10px}
+    .doc-upload-btn{padding:6px 14px;background:#fff;color:#374151;border:1.5px solid #e5e7eb;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:border-color 0.2s}
+    .doc-upload-btn:hover{border-color:#14b8a6;color:#0d9488}
+    .doc-file-name{font-size:12px;color:#6b7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .doc-remove-btn{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:2px}
+    .doc-remove-btn:hover{color:#dc2626}
+    .doc-hint{font-size:10px;color:#9ca3af;margin-top:4px}
   </style>
 </head>
 <body>
   <div class="header">
+    <button id="backToSettingsBtn" class="header-back">&#8592; Back to Settings</button>
     <h1>Manage Port Me</h1>
     <p>View and edit your AI operating instructions and profiles.</p>
   </div>
@@ -57,7 +97,31 @@
       <div class="section-title">Operating Instructions</div>
       <div class="section-description">Re-run the questionnaire to update how your AI speaks with you.</div>
       <button id="editInstructionsBtn" class="btn-secondary">Edit Instructions</button>
-      <div id="editNote" class="status-msg" style="display:none;color:#16a34a;">Open the Portility popup to continue.</div>
+      <div id="editStatus" class="status-msg"></div>
+    </div>
+
+    <!-- Inline Questionnaire -->
+    <div id="questionnaire-container" class="section">
+      <div class="section-title">Edit Your Instructions</div>
+      <div class="section-description">Update your answers below. Your instructions will be regenerated when you save.</div>
+
+      <div id="mq-page1" class="q-screen active">
+        <div id="mq-page1-content"></div>
+        <div class="mq-actions">
+          <button id="mqPage1NextBtn" class="btn-primary">Next</button>
+          <button id="mqCancelBtn1" class="mq-cancel-link">Cancel</button>
+        </div>
+      </div>
+
+      <div id="mq-page2" class="q-screen">
+        <div id="mq-page2-content"></div>
+        <div id="mqSaveError" class="q-error"></div>
+        <div class="mq-actions">
+          <button id="mqSaveBtn" class="btn-primary">Save Instructions</button>
+          <button id="mqCancelBtn2" class="mq-cancel-link">Cancel</button>
+        </div>
+        <button id="mqBackBtn" class="mq-cancel-link" style="margin-top:4px;">&#8592; Back</button>
+      </div>
     </div>
 
     <!-- Profiles Section (paid only) -->
@@ -67,14 +131,87 @@
       <div id="profilesList" class="profiles-list">
         <div class="empty">Loading profiles...</div>
       </div>
+      <button id="newProfileBtn" class="btn-primary" style="margin-top:8px;">+ New Profile</button>
       <div id="profilesStatus" class="status-msg"></div>
+    </div>
+
+    <!-- New Profile Flow (inline) -->
+    <div id="newProfileFlow" class="section">
+      <!-- Step 1: Type selection -->
+      <div id="np-type" class="np-screen active">
+        <div class="section-title">Choose a profile type</div>
+        <div class="section-description">This sets the questions and default look for your profile.</div>
+        <div class="profile-type-grid">
+          <button class="profile-type-card" data-profile-type="work">
+            <i class="ti ti-briefcase"></i>
+            <span class="profile-type-card-label">Work</span>
+          </button>
+          <button class="profile-type-card" data-profile-type="home">
+            <i class="ti ti-home"></i>
+            <span class="profile-type-card-label">Home</span>
+          </button>
+          <button class="profile-type-card" data-profile-type="hobby">
+            <i class="ti ti-palette"></i>
+            <span class="profile-type-card-label">Hobby</span>
+          </button>
+          <button class="profile-type-card" data-profile-type="other">
+            <i class="ti ti-star"></i>
+            <span class="profile-type-card-label">Other</span>
+          </button>
+        </div>
+        <button id="npTypeCancelBtn" class="mq-cancel-link">Cancel</button>
+      </div>
+
+      <!-- Step 2: Profile questionnaire (single page — all sections) -->
+      <div id="np-questionnaire" class="np-screen">
+        <div id="np-q-content"></div>
+        <div class="mq-actions">
+          <button id="npQNextBtn" class="btn-primary">Next</button>
+          <button id="npQCancelBtn" class="mq-cancel-link">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Customize (name, icon, color, document) -->
+      <div id="np-customize" class="np-screen">
+        <div class="profile-customize-title">Customize your profile</div>
+        <div class="profile-customize-preview">
+          <div id="npPreviewBadge" class="profile-badge large"></div>
+          <input id="npNameInput" class="profile-name-input" type="text" placeholder="Profile name" maxlength="30">
+        </div>
+        <div class="profile-section-label">Icon</div>
+        <div id="npIconGrid" class="profile-icon-grid"></div>
+        <div class="profile-section-label">Color</div>
+        <div id="npColorRow" class="profile-colour-row"></div>
+
+        <div class="doc-upload-area">
+          <div class="doc-upload-label">Document (optional)</div>
+          <div class="doc-upload-row">
+            <button id="npDocUploadBtn" class="doc-upload-btn">Upload file</button>
+            <span id="npDocFileName" class="doc-file-name"></span>
+            <button id="npDocRemoveBtn" class="doc-remove-btn" style="display:none;">&times;</button>
+          </div>
+          <div class="doc-hint">Upload a resume, bio, or reference document (.txt, .md, .pdf). Text will be included in your instructions.</div>
+          <input type="file" id="npDocFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display:none;">
+        </div>
+
+        <div class="mq-actions" style="margin-top:16px;">
+          <button id="npSaveBtn" class="btn-primary">Save Profile</button>
+          <button id="npSaveCancelBtn" class="mq-cancel-link">Cancel</button>
+        </div>
+        <button id="npCustomizeBackBtn" class="mq-cancel-link" style="margin-top:4px;">&#8592; Back</button>
+        <div id="npSaveStatus" class="status-msg"></div>
+      </div>
     </div>
   </div>
 
   <script src="encryption.js"></script>
   <script src="oauth.js"></script>
   <script src="firestore.js"></script>
+  <script src="questions-config.js"></script>
+  <script src="questionnaire.js"></script>
+  <script src="port-me-prompts.js"></script>
   <script src="profiles-config.js"></script>
+  <script src="profiles-prompts.js"></script>
   <script src="profiles-firestore.js"></script>
   <script src="portme-manage.js"></script>
 </body>
