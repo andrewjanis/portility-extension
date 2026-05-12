@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   chrome.storage.local.get('userTier', function (result) {
     var tier = (result.userTier && result.userTier.tier) || 'free';
-    if (tier !== 'paid') {
+    if (tier === 'free') {
       [backupSection, imageQualitySection].forEach(function (section) {
         if (!section) return;
         section.classList.add('locked');
@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', function () {
     ['portility_drive_backup_enabled', 'portility_compress_images', 'userTier'],
     function (result) {
       var tier = (result.userTier && result.userTier.tier) || 'free';
-      if (tier === 'paid') {
+      if (tier !== 'free') {
         driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
         compressToggle.checked = result.portility_compress_images !== false;
       } else {
@@ -267,5 +267,81 @@ document.addEventListener('DOMContentLoaded', function () {
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // ─── Usage ────────────────────────────────────────────────────────────────
+  var usageSection = document.getElementById('usageSection');
+  var usageSummary = document.getElementById('usageSummary');
+  var usageHistoryEl = document.getElementById('usageHistory');
+
+  function loadUsageInfo() {
+    ensureAuthenticated().then(function (auth) {
+      // Get tier
+      return getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
+        return { auth: auth, tier: tier };
+      });
+    }).then(function (ctx) {
+      var auth = ctx.auth;
+      var tier = ctx.tier;
+
+      // Fetch summary + history in parallel
+      return Promise.all([
+        getCurrentUsageSummary(auth.idToken, auth.firebaseUid, tier),
+        getUsageHistory(auth.idToken, auth.firebaseUid),
+      ]).then(function (results) {
+        var summary = results[0];
+        var history = results[1];
+        renderUsage(summary, history);
+      });
+    }).catch(function () {
+      if (usageSection) usageSection.style.display = 'none';
+    });
+  }
+
+  function renderUsage(summary, history) {
+    if (!usageSummary) return;
+
+    // Summary line
+    var tierLabel = summary.tierLabel || summary.tier;
+    var summaryText = 'You are on ' + tierLabel + ' \u2014 ' + summary.used + ' of ' + summary.limit + ' uses';
+    if (summary.isLifetime) {
+      summaryText += ' (lifetime)';
+    } else {
+      summaryText += ' this month';
+    }
+    usageSummary.textContent = summaryText;
+
+    // History (only for paid users)
+    if (!usageHistoryEl) return;
+    usageHistoryEl.innerHTML = '';
+
+    if (summary.isLifetime) return; // Free users just see lifetime count
+
+    // Get sorted keys (most recent first), limit to 12
+    var keys = Object.keys(history).sort().reverse().slice(0, 12);
+    if (keys.length === 0) return;
+
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var parts = key.split('-');
+      var year = parts[0];
+      var monthNum = parseInt(parts[1], 10);
+      var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      var monthName = monthNames[monthNum - 1] || key;
+
+      var row = document.createElement('div');
+      row.className = 'usage-history-row';
+      row.textContent = monthName + ' ' + year + ' \u2014 ' + history[key] + ' uses';
+      usageHistoryEl.appendChild(row);
+    }
+  }
+
+  // Load usage for signed-in users
+  chrome.identity.getAuthToken({ interactive: false }, function (token) {
+    if (chrome.runtime.lastError || !token) {
+      if (usageSection) usageSection.style.display = 'none';
+      return;
+    }
+    loadUsageInfo();
+  });
 
 });

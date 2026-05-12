@@ -406,6 +406,40 @@
       margin-top: 10px;
     }
 
+    /* ── Usage blocked modal ────────────────────────────────────────── */
+    #usageBlockedOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #usageBlockedOverlay.visible {
+      display: flex;
+    }
+
+    #usageBlockedModal {
+      background: #fff;
+      border-radius: 10px;
+      padding: 18px 16px;
+      width: 200px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+      text-align: center;
+    }
+
+    #usageBlockedModal p {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
     /* ── Second Opinion Results ────────────────────────────────────── */
     #soResults {
       padding: 0;
@@ -794,6 +828,15 @@
     </div>
   </div>
 
+  <!-- Usage Blocked Modal -->
+  <div id="usageBlockedOverlay">
+    <div id="usageBlockedModal">
+      <p id="usageBlockedMsg">You've reached your limit.</p>
+      <a id="usageUpgradeBtn" class="modal-btn" target="_blank" style="text-decoration:none;text-align:center;margin-bottom:8px;background:linear-gradient(135deg,#14B8A6,#4ADE80);color:#fff;border:none;">Upgrade</a>
+      <button id="usageBlockedDismissBtn" class="modal-btn" style="background:linear-gradient(#fff,#fff) padding-box,linear-gradient(135deg,#d1d5db,#d1d5db) border-box;color:#6b7280;border:1.5px solid transparent;">Close</button>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════════════════════════════════════════════════
        PORT MY CHAT PRO — Review Screen
        ═══════════════════════════════════════════════════════════════════════ -->
@@ -854,6 +897,7 @@
   <script src="profiles-prompts.js"></script>
   <script src="profiles-firestore.js"></script>
   <script src="indexeddb.js"></script>
+  <script src="usage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

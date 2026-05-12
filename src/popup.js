@@ -264,6 +264,38 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalSubmitBtn = document.getElementById('modalSubmitBtn');
   const modalThanks = document.getElementById('modalThanks');
 
+  // ── Usage blocked modal references ────────────────────────────────────────
+  const usageBlockedOverlay = document.getElementById('usageBlockedOverlay');
+  const usageBlockedMsg = document.getElementById('usageBlockedMsg');
+  const usageUpgradeBtn = document.getElementById('usageUpgradeBtn');
+  const usageBlockedDismissBtn = document.getElementById('usageBlockedDismissBtn');
+
+  usageBlockedDismissBtn.addEventListener('click', function () {
+    usageBlockedOverlay.classList.remove('visible');
+  });
+
+  function showUsageBlocked(result, feature) {
+    var msg = 'You\'ve used all ' + result.limit + ' uses';
+    if (result.tier === 'free') msg += ' (lifetime).';
+    else msg += ' this month.';
+    usageBlockedMsg.textContent = msg;
+
+    if (result.upgradeUrl) {
+      usageUpgradeBtn.href = result.upgradeUrl;
+      usageUpgradeBtn.style.display = 'block';
+    } else {
+      usageUpgradeBtn.style.display = 'none';
+    }
+    usageBlockedOverlay.classList.add('visible');
+
+    trackEvent('usage_blocked', {
+      tier: result.tier,
+      limit: result.limit,
+      used: result.used,
+      feature: feature || 'unknown',
+    });
+  }
+
   // Variable to hold extracted text so we can clear it on moderation flag
   let _extractedConversationText = null;
 
@@ -359,7 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyTierUI() {
-    var isPaid = _userTier === 'paid';
+    var isPaid = _userTier !== 'free';
     console.log('[Popup] User tier:', _userTier);
 
     if (freeButtonsDiv) freeButtonsDiv.style.display = isPaid ? 'none' : '';
@@ -874,6 +906,15 @@ document.addEventListener('DOMContentLoaded', () => {
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
 
+      // Usage gating check
+      var usageResult = await checkUsageAllowed(auth.idToken, auth.firebaseUid, _userTier);
+      if (!usageResult.allowed) {
+        portInstructionsBtn.disabled = false;
+        setPortStatus('');
+        showUsageBlocked(usageResult, 'port_me_pro');
+        return;
+      }
+
       // Migrate legacy profile if needed
       crumb('instr_migrate');
       await migrateLegacyProfile(auth.userId, auth.idToken, auth.firebaseUid);
@@ -895,6 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
         crumb('instr_single_profile');
         trackEvent('portme_pro_profile_selected', { profileId: profiles[0].id, profileType: profiles[0].type });
         await portWithProfile(profiles[0], auth);
+        incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
       } else {
         // Multiple profiles — show picker
         crumb('instr_picker');
@@ -1056,6 +1098,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             var auth = await ensureAuthenticated();
             await portWithProfile(profile, auth);
+            incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
           } catch (err) {
             profilePickerStatus.textContent = err.message || 'Something went wrong.';
             profilePickerStatus.className = 'profile-picker-status error';
@@ -1635,6 +1678,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Port with the new profile
       await portWithProfile(profile, auth);
+      incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
     } catch (err) {
       crumb('profile_save_failed', { error: (err.message || '').substring(0, 200) });
       profileCustomizeStatus.textContent = err.message || 'Failed to save. Try again.';
@@ -2122,6 +2166,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('Extracting conversation...');
 
     try {
+      // Usage gating check
+      var auth = await ensureAuthenticated();
+      var usageResult = await checkUsageAllowed(auth.idToken, auth.firebaseUid, _userTier);
+      if (!usageResult.allowed) {
+        proChatBtn.disabled = false;
+        setStatus('');
+        showUsageBlocked(usageResult, 'port_my_chat_pro');
+        return;
+      }
+
       // Step 1: Get active tab
       const tabs = await new Promise(function (resolve) {
         chrome.tabs.query({ active: true, currentWindow: true }, resolve);
@@ -2307,6 +2361,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Step 7: Render review
       renderProReview(_proData);
       crumb('pro_rendered');
+      incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
 
       trackEvent('pro_brief_generated', {
         sourcePlatform: sourcePlatform,
@@ -2478,6 +2533,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Second Opinion ────────────────────────────────────────────────────────
   async function triggerSecondOpinion() {
+    // Usage gating check
+    try {
+      var soAuth = await ensureAuthenticated();
+      var soUsageResult = await checkUsageAllowed(soAuth.idToken, soAuth.firebaseUid, _userTier);
+      if (!soUsageResult.allowed) {
+        showUsageBlocked(soUsageResult, 'second_opinion');
+        return;
+      }
+    } catch (e) {
+      setStatus('Auth failed. Try signing in.', true);
+      return;
+    }
+
     var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
     if (!proxyBase) {
       setStatus('Worker URL not configured.', true);
@@ -2601,6 +2669,7 @@ document.addEventListener('DOMContentLoaded', () => {
         comparison: compareData,
         durationMs: Date.now() - _soStartTime,
       });
+      incrementUsage(soAuth.idToken, soAuth.firebaseUid, _userTier).catch(function () {});
 
     } catch (err) {
       stopSuggestionCycle();

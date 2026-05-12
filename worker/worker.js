@@ -102,22 +102,47 @@ async function handleStripeWebhook(request, env) {
     if (firebaseUID) {
       // Get a fresh access token from service account
       const accessToken = await getFirebaseAccessToken(env);
+
+      // Determine tier from Stripe metadata (defaults to 'paid' for backwards compat)
+      const tierValue = session.metadata.tier || 'paid';
+
       // Write tier to Firestore via REST API
-      const firestoreUrl = 'https://firestore.googleapis.com/v1/projects/' +
-        env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + firebaseUID +
-        '?updateMask.fieldPaths=tier';
-      const firestoreResp = await fetch(firestoreUrl, {
+      const userDocUrl = 'https://firestore.googleapis.com/v1/projects/' +
+        env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + firebaseUID;
+      const firestoreResp = await fetch(userDocUrl + '?updateMask.fieldPaths=tier', {
         method: 'PATCH',
         headers: {
           'Authorization': 'Bearer ' + accessToken,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          fields: { tier: { stringValue: 'paid' } },
+          fields: { tier: { stringValue: tierValue } },
         }),
       });
       if (!firestoreResp.ok) {
-        console.error('[Webhook] Firestore write failed:', firestoreResp.status, await firestoreResp.text());
+        console.error('[Webhook] Firestore tier write failed:', firestoreResp.status, await firestoreResp.text());
+      }
+
+      // Set billingAnchorDate if not already present
+      try {
+        const userDoc = await fetch(userDocUrl + '?mask.fieldPaths=billingAnchorDate', {
+          headers: { 'Authorization': 'Bearer ' + accessToken },
+        }).then(r => r.json());
+
+        if (!userDoc.fields?.billingAnchorDate) {
+          await fetch(userDocUrl + '?updateMask.fieldPaths=billingAnchorDate', {
+            method: 'PATCH',
+            headers: {
+              'Authorization': 'Bearer ' + accessToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              fields: { billingAnchorDate: { timestampValue: new Date().toISOString() } },
+            }),
+          });
+        }
+      } catch (anchorErr) {
+        console.error('[Webhook] billingAnchorDate write failed:', anchorErr.message);
       }
     }
   }
