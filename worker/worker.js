@@ -1,4 +1,4 @@
-import Stripe from 'https://esm.sh/stripe@14';
+import Stripe from 'stripe';
 
 /**
  * Portility — Cloudflare Worker proxy
