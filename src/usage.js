@@ -137,12 +137,14 @@ async function checkUsageAllowed(idToken, firebaseUid, userTier) {
 /**
  * Increment usage after a pro feature succeeds.
  * Free: increments lifetimeFreeUsed. Paid: increments monthlyUsage[currentWindowKey].
+ * Also fires a PostHog 'pro_feature_used' event if trackEvent is available.
  * @param {string} idToken
  * @param {string} firebaseUid
  * @param {string} userTier
+ * @param {string} [feature] - feature name for analytics (e.g. 'port_me_pro')
  * @returns {Promise<void>}
  */
-async function incrementUsage(idToken, firebaseUid, userTier) {
+async function incrementUsage(idToken, firebaseUid, userTier, feature) {
   var tierConfig = USAGE_TIERS[userTier] || USAGE_TIERS.free;
   var usageDoc = await getUsageDoc(idToken, firebaseUid);
 
@@ -196,6 +198,17 @@ async function incrementUsage(idToken, firebaseUid, userTier) {
           },
         },
       }),
+    });
+  }
+
+  // Fire PostHog event
+  if (typeof trackEvent === 'function') {
+    var newUsed = !tierConfig.monthly ? usageDoc.lifetimeFreeUsed + 1 : (usageDoc.monthlyUsage[getCurrentWindowKey(usageDoc.billingAnchorDate)] || 0) + 1;
+    trackEvent('pro_feature_used', {
+      feature: feature || 'unknown',
+      tier: userTier,
+      used: newUsed,
+      limit: tierConfig.limit,
     });
   }
 }

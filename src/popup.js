@@ -402,8 +402,9 @@ document.addEventListener('DOMContentLoaded', () => {
   checkUserTier();
 
   // ── Port mode state ────────────────────────────────────────────────────
-  let _portMode = 'chat'; // 'chat' or 'instructions'
+  let _portMode = 'chat'; // 'chat', 'instructions', or 'pro_brief'
   let _decryptedInstructions = null;
+  let _proBriefContent = null;
 
   // ── Questionnaire state (built dynamically from config) ─────────────────
   let qAnswers = {};
@@ -936,7 +937,7 @@ document.addEventListener('DOMContentLoaded', () => {
         crumb('instr_single_profile');
         trackEvent('portme_pro_profile_selected', { profileId: profiles[0].id, profileType: profiles[0].type });
         await portWithProfile(profiles[0], auth);
-        incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
+        incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
       } else {
         // Multiple profiles — show picker
         crumb('instr_picker');
@@ -1098,7 +1099,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             var auth = await ensureAuthenticated();
             await portWithProfile(profile, auth);
-            incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
+            incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
           } catch (err) {
             profilePickerStatus.textContent = err.message || 'Something went wrong.';
             profilePickerStatus.className = 'profile-picker-status error';
@@ -1678,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Port with the new profile
       await portWithProfile(profile, auth);
-      incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
+      incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
     } catch (err) {
       crumb('profile_save_failed', { error: (err.message || '').substring(0, 200) });
       profileCustomizeStatus.textContent = err.message || 'Failed to save. Try again.';
@@ -1896,6 +1897,49 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (err) {
         crumb('instr_failed', { error: (err.message || '').substring(0, 200) });
+        setScreen2Status(err.message || 'Something went wrong.', true);
+        setAllDestBtnsDisabled(false);
+      }
+      return;
+    }
+
+    // ── Pro brief mode: port the project brief ──
+    if (_portMode === 'pro_brief') {
+      crumb('pro_brief_dest', { dest: destination });
+      try {
+        if (!_proBriefContent) {
+          throw new Error('No project brief available.');
+        }
+
+        if (destination === 'save') {
+          var safeTitle = (_proData && _proData.title || 'brief').replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
+          var blob = new Blob([_proBriefContent], { type: 'text/markdown' });
+          var blobUrl = URL.createObjectURL(blob);
+          chrome.downloads.download({
+            url: blobUrl,
+            filename: 'portility-pro-' + (safeTitle || 'brief') + '.md',
+            saveAs: true,
+          }, function () {
+            URL.revokeObjectURL(blobUrl);
+          });
+          setScreen2Status('Project brief saved!');
+          crumb('pro_brief_ported', { dest: 'save' });
+          trackEvent('pro_brief_ported', { destination: 'file' });
+        } else {
+          await writeClipboard(_proBriefContent);
+          await new Promise(function (resolve) {
+            chrome.storage.local.set({ portility_pending_paste: _proBriefContent }, resolve);
+          });
+          chrome.tabs.create({ url: DESTINATION_URLS[destination] });
+          setScreen2Status('Brief copied \u2014 paste it in the new tab!');
+          crumb('pro_brief_ported', { dest: destination });
+          trackEvent('pro_brief_ported', { destination: destination });
+        }
+
+        _proBriefContent = null;
+        _proData = null;
+      } catch (err) {
+        crumb('pro_brief_failed', { error: (err.message || '').substring(0, 200) });
         setScreen2Status(err.message || 'Something went wrong.', true);
         setAllDestBtnsDisabled(false);
       }
@@ -2361,7 +2405,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Step 7: Render review
       renderProReview(_proData);
       crumb('pro_rendered');
-      incrementUsage(auth.idToken, auth.firebaseUid, _userTier).catch(function () {});
+      incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_my_chat_pro').catch(function () {});
 
       trackEvent('pro_brief_generated', {
         sourcePlatform: sourcePlatform,
@@ -2421,35 +2465,21 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.storage.local.set({ lastProBrief: { brief: _proData.brief, timestamp: Date.now() } });
       crumb('pro_saved');
 
-      // Download as .md file
-      var downloadContent = buildDownloadContent(_proData);
-      var blob = new Blob([downloadContent], { type: 'text/markdown' });
-      var blobUrl = URL.createObjectURL(blob);
-
-      var safeTitle = _proData.title.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-      var filename = 'portility-pro-' + (safeTitle || 'brief') + '.md';
-
-      chrome.downloads.download({
-        url: blobUrl,
-        filename: filename,
-        saveAs: true,
-      }, function () {
-        URL.revokeObjectURL(blobUrl);
-      });
-
-      crumb('pro_downloaded');
-      proStatus.textContent = 'Brief saved and downloaded!';
-
       trackEvent('pro_brief_confirmed', {
         sourcePlatform: _proData.sourcePlatform,
         assetsTotal: _proData.assets.length,
         assetsSelected: _proData.assets.filter(function (a) { return a.selected; }).length,
       });
 
-      setTimeout(function () {
-        hideProReview();
-        _proData = null;
-      }, 2000);
+      // Build the content to port and show destination picker
+      _proBriefContent = buildDownloadContent(_proData);
+      _portMode = 'pro_brief';
+      screen2Label.textContent = 'Port project brief to\u2026';
+      setScreen2Status('');
+      setAllDestBtnsDisabled(false);
+      instructionsCheckboxLabel.style.display = 'none';
+      hideProReview();
+      showScreen('screen2');
 
     } catch (err) {
       proError.textContent = err.message || 'Failed to save.';
@@ -2669,7 +2699,7 @@ document.addEventListener('DOMContentLoaded', () => {
         comparison: compareData,
         durationMs: Date.now() - _soStartTime,
       });
-      incrementUsage(soAuth.idToken, soAuth.firebaseUid, _userTier).catch(function () {});
+      incrementUsage(soAuth.idToken, soAuth.firebaseUid, _userTier, 'second_opinion').catch(function () {});
 
     } catch (err) {
       stopSuggestionCycle();
