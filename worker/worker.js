@@ -19,6 +19,29 @@ import Stripe from 'https://esm.sh/stripe@14';
  *   FIREBASE_SA_KEY       — Service account private_key from JSON key (PEM format)
  */
 
+// ─── Token usage extraction ──────────────────────────────────────────────────
+function extractUsage(data, provider, model) {
+  if (provider === 'anthropic' && data.usage) {
+    return {
+      provider: 'anthropic',
+      model: model,
+      input_tokens: data.usage.input_tokens || 0,
+      output_tokens: data.usage.output_tokens || 0,
+      total_tokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+    };
+  }
+  if (provider === 'openai' && data.usage) {
+    return {
+      provider: 'openai',
+      model: model,
+      input_tokens: data.usage.prompt_tokens || 0,
+      output_tokens: data.usage.completion_tokens || 0,
+      total_tokens: data.usage.total_tokens || 0,
+    };
+  }
+  return null;
+}
+
 // ─── Google Service Account JWT → Access Token ──────────────────────────────
 async function getFirebaseAccessToken(env) {
   const now = Math.floor(Date.now() / 1000);
@@ -206,6 +229,7 @@ async function handleSummarize(request, env, corsHeaders) {
   });
 
   var data = await response.json();
+  data._usage = extractUsage(data, 'anthropic', 'claude-3-haiku-20240307');
 
   return new Response(JSON.stringify(data), {
     status: response.status,
@@ -283,6 +307,7 @@ async function handleSummarizePro(request, env, corsHeaders) {
   });
 
   var data = await response.json();
+  data._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
 
   return new Response(JSON.stringify(data), {
     status: response.status,
@@ -345,7 +370,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
     }
 
     text = (data.content && data.content[0]) ? data.content[0].text : '';
-    return new Response(JSON.stringify({ text: text, source: 'claude' }), {
+    return new Response(JSON.stringify({ text: text, source: 'claude', _usage: extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514') }), {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
 
@@ -376,7 +401,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
     }
 
     text = (data.choices && data.choices[0]) ? data.choices[0].message.content : '';
-    return new Response(JSON.stringify({ text: text, source: 'chatgpt' }), {
+    return new Response(JSON.stringify({ text: text, source: 'chatgpt', _usage: extractUsage(data, 'openai', 'gpt-4o') }), {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
   }
@@ -454,6 +479,8 @@ async function handleCompare(request, env, corsHeaders) {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
   }
+
+  parsed._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
 
   return new Response(JSON.stringify(parsed), {
     headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),

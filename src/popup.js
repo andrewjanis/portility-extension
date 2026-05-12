@@ -129,6 +129,18 @@ async function trackEvent(eventName, properties) {
   } catch (e) {}
 }
 
+function trackTokenUsage(endpoint, usage) {
+  if (!usage) return;
+  trackEvent('tokens_used', {
+    endpoint: endpoint,
+    provider: usage.provider,
+    model: usage.model,
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    total_tokens: usage.total_tokens,
+  });
+}
+
 // ─── Bug report ───────────────────────────────────────────────────────────────
 const sessionStart = Date.now();
 
@@ -2257,6 +2269,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const proResponseData = await proResponse.json();
+      trackTokenUsage('summarize-pro', proResponseData._usage);
 
       // Step 6: Parse Sonnet's response
       crumb('pro_summarized', { hasContent: !!(proResponseData.content && proResponseData.content.length) });
@@ -2519,6 +2532,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
       var summaryData = await summaryResp.json();
+      trackTokenUsage('summarize-pro', summaryData._usage);
 
       var contentText = '';
       if (summaryData.content && summaryData.content.length > 0) {
@@ -2562,6 +2576,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       var soData = await soResp.json();
       if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
+      trackTokenUsage('second-opinion', soData._usage);
 
       // Step 6: POST to /compare
       updateDialStatus('Comparing both responses\u2026');
@@ -2574,6 +2589,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       var compareData = await compareResp.json();
       if (!compareResp.ok) throw new Error(compareData.error || 'Comparison request failed');
+      trackTokenUsage('compare', compareData._usage);
 
       // Step 7: Pass to results UI (Task 14)
       soNewBtn.style.display = 'none';
