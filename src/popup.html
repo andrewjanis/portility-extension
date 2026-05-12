@@ -842,25 +842,23 @@
        ═══════════════════════════════════════════════════════════════════════ -->
   <div id="proReview">
     <div class="pro-header">
-      <span class="pro-title">Project Brief</span>
+      <img src="icons/logo-portility-ai.png" alt="Portility AI" class="pro-header-logo">
       <button id="proBackBtn" class="pro-back-btn">&larr; Back</button>
     </div>
 
     <!-- Loading state -->
     <div id="proLoading" class="pro-loading">
       <div class="spinner"></div>
-      <div>Generating project brief...</div>
+      <div id="proLoadingText">Generating project brief...</div>
       <div style="font-size:10px;color:#9ca3af;margin-top:4px;">This may take 10-20 seconds</div>
     </div>
 
     <!-- Content (hidden until response arrives) -->
     <div id="proContent" style="display:none;">
-      <div id="proBriefTitle" style="font-size:14px;font-weight:700;color:#111;margin-bottom:8px;"></div>
-      <div id="proBriefPreview" class="pro-brief-preview"></div>
 
       <div id="proAssetsSection">
         <div class="pro-assets-title">Assets</div>
-        <div class="pro-assets-hint">Pre-selected items are recommended by AI. Adjust as needed.</div>
+        <div class="pro-assets-hint">Here are the artifacts Portility has identified as part of this chat. Pre-selected artifacts are recommended by Portility to ensure proper context. Adjust as needed.</div>
         <table class="pro-asset-table">
           <thead>
             <tr>

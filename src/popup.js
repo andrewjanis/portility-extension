@@ -310,8 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const proBackBtn = document.getElementById('proBackBtn');
   const proLoading = document.getElementById('proLoading');
   const proContent = document.getElementById('proContent');
-  const proBriefTitle = document.getElementById('proBriefTitle');
-  const proBriefPreview = document.getElementById('proBriefPreview');
+  const proLoadingText = document.getElementById('proLoadingText');
   const proAssetTableBody = document.getElementById('proAssetTableBody');
   const proAssetsSection = document.getElementById('proAssetsSection');
   const proNoAssets = document.getElementById('proNoAssets');
@@ -2045,16 +2044,43 @@ document.addEventListener('DOMContentLoaded', () => {
   // PORT MY CHAT PRO
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ── Pro loading text rotation ──────────────────────────────────────────
+  var _proLoadingMessages = [
+    'Generating project brief\u2026',
+    'Summarizing conversation\u2026',
+    'Compressing images\u2026',
+  ];
+  var _proLoadingIdx = 0;
+  var _proLoadingInterval = null;
+
+  function startProLoadingCycle() {
+    _proLoadingIdx = 0;
+    if (proLoadingText) proLoadingText.textContent = _proLoadingMessages[0];
+    _proLoadingInterval = setInterval(function () {
+      _proLoadingIdx = (_proLoadingIdx + 1) % _proLoadingMessages.length;
+      if (proLoadingText) proLoadingText.textContent = _proLoadingMessages[_proLoadingIdx];
+    }, 3000);
+  }
+
+  function stopProLoadingCycle() {
+    if (_proLoadingInterval) {
+      clearInterval(_proLoadingInterval);
+      _proLoadingInterval = null;
+    }
+  }
+
   function showProReview() {
     document.body.classList.add('pro-review-active');
     proLoading.style.display = 'block';
     proContent.style.display = 'none';
     proError.textContent = '';
     proStatus.textContent = '';
+    startProLoadingCycle();
   }
 
   function hideProReview() {
     document.body.classList.remove('pro-review-active');
+    stopProLoadingCycle();
   }
 
   function mergeAssets(extractedAssets, sonnetAssets) {
@@ -2117,9 +2143,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderProReview(data) {
     proLoading.style.display = 'none';
     proContent.style.display = 'block';
-
-    proBriefTitle.textContent = data.title;
-    proBriefPreview.textContent = data.brief;
+    stopProLoadingCycle();
 
     // Build asset table
     proAssetTableBody.innerHTML = '';
