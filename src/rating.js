@@ -90,29 +90,24 @@
       btn.textContent = 'Saving...';
 
       var reason = document.getElementById('reasonInput').value.trim();
-      var docId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-      var url = 'https://firestore.googleapis.com/v1/projects/portility/databases/(default)/documents/second_opinion_feedback/' + docId;
+      var proxyBase = d.proxyUrl || '';
 
-      var fields = {
-        firebaseUid: { stringValue: d.firebaseUid },
-        platform: { stringValue: d.platform },
-        comparisonModel: { stringValue: d.source },
-        aiScore: { integerValue: String(score) },
-        humanRating: { stringValue: selected },
-        humanReason: { stringValue: reason },
-        originalBrief: { stringValue: d.originalBrief },
-        secondOpinion: { stringValue: d.secondOpinion },
-        questionType: { stringValue: cmp.question_type || 'analytical' },
-        createdAt: { timestampValue: new Date().toISOString() },
-      };
-
-      fetch(url, {
-        method: 'PATCH',
+      fetch(proxyBase + '/feedback', {
+        method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + d.idToken,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fields: fields }),
+        body: JSON.stringify({
+          platform: d.platform,
+          comparisonModel: d.source,
+          aiScore: score,
+          humanRating: selected,
+          humanReason: reason,
+          originalBrief: d.originalBrief,
+          secondOpinion: d.secondOpinion,
+          questionType: cmp.question_type || 'analytical',
+        }),
       })
         .then(function (r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);

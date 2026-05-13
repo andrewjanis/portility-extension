@@ -402,6 +402,77 @@ async function handleUse(request, env, corsHeaders) {
   });
 }
 
+// ─── POST /feedback — save Second Opinion feedback via service account ──────
+async function handleFeedback(request, env, corsHeaders) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders });
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+      status: 400, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  // Verify the user's token
+  var authHeader = request.headers.get('Authorization') || '';
+  var idToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (!idToken) {
+    return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseIdToken(idToken, env.FIREBASE_API_KEY);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid token: ' + e.message }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  // Write to Firestore using service account
+  var accessToken = await getFirebaseAccessToken(env);
+  var docId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  var docUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/second_opinion_feedback/' + docId;
+
+  var fields = {
+    firebaseUid: { stringValue: verifiedUid },
+    platform: { stringValue: body.platform || '' },
+    comparisonModel: { stringValue: body.comparisonModel || '' },
+    aiScore: { integerValue: String(body.aiScore || 0) },
+    humanRating: { stringValue: body.humanRating || '' },
+    humanReason: { stringValue: body.humanReason || '' },
+    originalBrief: { stringValue: body.originalBrief || '' },
+    secondOpinion: { stringValue: body.secondOpinion || '' },
+    questionType: { stringValue: body.questionType || 'analytical' },
+    createdAt: { timestampValue: new Date().toISOString() },
+  };
+
+  var resp = await fetch(docUrl, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: fields }),
+  });
+
+  if (!resp.ok) {
+    var errText = await resp.text();
+    return new Response(JSON.stringify({ error: 'Firestore write failed: ' + errText }), {
+      status: resp.status, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
 async function handleStripeWebhook(request, env) {
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const body = await request.text();
@@ -538,6 +609,8 @@ export default {
         return await handleCompare(request, env, corsHeaders);
       } else if (path === '/use') {
         return await handleUse(request, env, corsHeaders);
+      } else if (path === '/feedback') {
+        return await handleFeedback(request, env, corsHeaders);
       } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
         return handleStripeWebhook(request, env);
       } else {

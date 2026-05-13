@@ -3418,6 +3418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       var auth = await ensureAuthenticated();
       // Stash data in chrome.storage.local for the rating page to read
+      var ratingProxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
       var ratingData = {
         originalBrief: _soResultData.originalBrief,
         secondOpinion: _soResultData.secondOpinion,
@@ -3426,6 +3427,7 @@ document.addEventListener('DOMContentLoaded', () => {
         comparison: _soResultData.comparison,
         idToken: auth.idToken,
         firebaseUid: auth.firebaseUid,
+        proxyUrl: ratingProxyBase,
       };
       await new Promise(function (resolve) {
         chrome.storage.local.set({ portility_rating_data: ratingData }, resolve);
