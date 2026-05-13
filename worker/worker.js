@@ -19,6 +19,40 @@ import Stripe from 'stripe';
  *   FIREBASE_SA_KEY       — Service account private_key from JSON key (PEM format)
  */
 
+// ─── PostHog LLM generation tracking ────────────────────────────────────────
+function trackLLMGeneration(env, distinctId, params) {
+  if (!env.POSTHOG_API_KEY) return;
+  var inputTruncated = params.input;
+  if (Array.isArray(inputTruncated)) {
+    inputTruncated = inputTruncated.map(function (msg) {
+      return { role: msg.role, content: typeof msg.content === 'string' ? msg.content.substring(0, 500) : msg.content };
+    });
+  }
+  fetch('https://app.posthog.com/capture/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: env.POSTHOG_API_KEY,
+      event: '$ai_generation',
+      distinct_id: distinctId || 'worker-anonymous',
+      properties: {
+        $ai_model: params.model,
+        $ai_provider: params.provider,
+        $ai_input_tokens: params.inputTokens,
+        $ai_output_tokens: params.outputTokens,
+        $ai_latency: params.latencyMs,
+        $ai_http_status: params.httpStatus,
+        $ai_input: inputTruncated,
+        $ai_output_choices: params.outputText ? [{ content: params.outputText }] : [],
+        $ai_base_url: params.provider === 'anthropic'
+          ? 'https://api.anthropic.com' : 'https://api.openai.com',
+        $lib: 'portility-worker',
+      },
+      timestamp: new Date().toISOString(),
+    }),
+  }).catch(function () {});
+}
+
 // ─── Token usage extraction ──────────────────────────────────────────────────
 function extractUsage(data, provider, model) {
   if (provider === 'anthropic' && data.usage) {
@@ -155,7 +189,7 @@ export default {
     var corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Portility-Distinct-Id',
     };
 
     // Handle preflight
@@ -234,6 +268,9 @@ async function handleSummarize(request, env, corsHeaders) {
     });
   }
 
+  var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
+  var startTime = Date.now();
+
   var response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -255,6 +292,17 @@ async function handleSummarize(request, env, corsHeaders) {
 
   var data = await response.json();
   data._usage = extractUsage(data, 'anthropic', 'claude-3-haiku-20240307');
+
+  trackLLMGeneration(env, distinctId, {
+    model: 'claude-3-haiku-20240307',
+    provider: 'anthropic',
+    input: [{ role: 'user', content: text }],
+    outputText: (data.content && data.content[0]) ? data.content[0].text : '',
+    inputTokens: data.usage ? data.usage.input_tokens || 0 : 0,
+    outputTokens: data.usage ? data.usage.output_tokens || 0 : 0,
+    latencyMs: Date.now() - startTime,
+    httpStatus: response.status,
+  });
 
   return new Response(JSON.stringify(data), {
     status: response.status,
@@ -314,6 +362,9 @@ async function handleSummarizePro(request, env, corsHeaders) {
       JSON.stringify(assets, null, 2);
   }
 
+  var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
+  var startTime = Date.now();
+
   var response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -333,6 +384,17 @@ async function handleSummarizePro(request, env, corsHeaders) {
 
   var data = await response.json();
   data._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
+
+  trackLLMGeneration(env, distinctId, {
+    model: 'claude-sonnet-4-20250514',
+    provider: 'anthropic',
+    input: [{ role: 'user', content: userContent }],
+    outputText: (data.content && data.content[0]) ? data.content[0].text : '',
+    inputTokens: data.usage ? data.usage.input_tokens || 0 : 0,
+    outputTokens: data.usage ? data.usage.output_tokens || 0 : 0,
+    latencyMs: Date.now() - startTime,
+    httpStatus: response.status,
+  });
 
   return new Response(JSON.stringify(data), {
     status: response.status,
@@ -364,6 +426,8 @@ async function handleSecondOpinion(request, env, corsHeaders) {
 
   var systemPrompt = 'You are reviewing a project brief generated from a conversation on a different AI platform. Analyze independently: soundness of conclusions, risks/gaps/blind spots, alternative approaches, priority assessment.';
 
+  var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
+  var startTime = Date.now();
   var response, data, text;
 
   // Platform pairing: Claude→ChatGPT, ChatGPT→Claude, Gemini→ChatGPT
@@ -395,6 +459,16 @@ async function handleSecondOpinion(request, env, corsHeaders) {
     }
 
     text = (data.content && data.content[0]) ? data.content[0].text : '';
+    trackLLMGeneration(env, distinctId, {
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+      input: [{ role: 'user', content: brief }],
+      outputText: text,
+      inputTokens: data.usage ? data.usage.input_tokens || 0 : 0,
+      outputTokens: data.usage ? data.usage.output_tokens || 0 : 0,
+      latencyMs: Date.now() - startTime,
+      httpStatus: response.status,
+    });
     return new Response(JSON.stringify({ text: text, source: 'claude', _usage: extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514') }), {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
@@ -426,6 +500,16 @@ async function handleSecondOpinion(request, env, corsHeaders) {
     }
 
     text = (data.choices && data.choices[0]) ? data.choices[0].message.content : '';
+    trackLLMGeneration(env, distinctId, {
+      model: 'gpt-4o',
+      provider: 'openai',
+      input: [{ role: 'user', content: brief }],
+      outputText: text,
+      inputTokens: data.usage ? data.usage.prompt_tokens || 0 : 0,
+      outputTokens: data.usage ? data.usage.completion_tokens || 0 : 0,
+      latencyMs: Date.now() - startTime,
+      httpStatus: response.status,
+    });
     return new Response(JSON.stringify({ text: text, source: 'chatgpt', _usage: extractUsage(data, 'openai', 'gpt-4o') }), {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
@@ -444,6 +528,9 @@ async function handleCompare(request, env, corsHeaders) {
     });
   }
 
+  var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
+  var startTime = Date.now();
+
   var systemPrompt = 'You are a neutral evaluator comparing two AI responses to the same question. ' +
     'Judge only on accuracy, completeness, and logical consistency. ' +
     'Do not consider tone, style, or formatting. ' +
@@ -461,6 +548,8 @@ async function handleCompare(request, env, corsHeaders) {
     '- Provide EXACTLY 3 agreements and 3 divergences\n' +
     '- Each agreement/divergence should be 1-2 concise sentences';
 
+  var userContent = 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion;
+
   var response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -475,7 +564,7 @@ async function handleCompare(request, env, corsHeaders) {
       messages: [
         {
           role: 'user',
-          content: 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion,
+          content: userContent,
         },
       ],
     }),
@@ -506,6 +595,17 @@ async function handleCompare(request, env, corsHeaders) {
   }
 
   parsed._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
+
+  trackLLMGeneration(env, distinctId, {
+    model: 'claude-sonnet-4-20250514',
+    provider: 'anthropic',
+    input: [{ role: 'user', content: userContent }],
+    outputText: contentText,
+    inputTokens: data.usage ? data.usage.input_tokens || 0 : 0,
+    outputTokens: data.usage ? data.usage.output_tokens || 0 : 0,
+    latencyMs: Date.now() - startTime,
+    httpStatus: response.status,
+  });
 
   return new Response(JSON.stringify(parsed), {
     headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
