@@ -2774,9 +2774,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function soZoneColors(score) {
-    if (score < 34) return { text: '#E74C3C', needle: '#C0392B' };
-    if (score < 67) return { text: '#D4AC0D', needle: '#D4AC0D' };
-    return { text: '#27AE60', needle: '#2ECC71' };
+    if (score < 34) return { text: '#fa000c', needle: '#fa000c' };
+    if (score < 67) return { text: '#FFD348', needle: '#FFD348' };
+    return { text: '#41f531', needle: '#41f531' };
   }
 
   function soTypeColors(questionType) {
