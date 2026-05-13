@@ -296,6 +296,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function showUsageWarning(warning) {
+    var banner = document.getElementById('usageWarningBanner');
+    if (!banner) return;
+    banner.textContent = warning.message || ('You\'ve used ' + warning.used + ' of ' + warning.limit + ' uses.');
+    banner.style.display = 'block';
+    banner.onclick = function () { banner.style.display = 'none'; };
+    setTimeout(function () { banner.style.display = 'none'; }, 8000);
+  }
+
   // Variable to hold extracted text so we can clear it on moderation flag
   let _extractedConversationText = null;
 
@@ -906,14 +915,15 @@ document.addEventListener('DOMContentLoaded', () => {
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
 
-      // Usage gating check
-      var usageResult = await checkUsageAllowed(auth.idToken, auth.firebaseUid, _userTier);
+      // Usage gating — atomic check + increment
+      var usageResult = await useFeature(auth.idToken, auth.firebaseUid, 'port_me_pro');
       if (!usageResult.allowed) {
         portInstructionsBtn.disabled = false;
         setPortStatus('');
         showUsageBlocked(usageResult, 'port_me_pro');
         return;
       }
+      if (usageResult.warning) showUsageWarning(usageResult.warning);
 
       // Migrate legacy profile if needed
       crumb('instr_migrate');
@@ -936,7 +946,6 @@ document.addEventListener('DOMContentLoaded', () => {
         crumb('instr_single_profile');
         trackEvent('portme_pro_profile_selected', { profileId: profiles[0].id, profileType: profiles[0].type });
         await portWithProfile(profiles[0], auth);
-        incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
       } else {
         // Multiple profiles — show picker
         crumb('instr_picker');
@@ -1098,7 +1107,6 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             var auth = await ensureAuthenticated();
             await portWithProfile(profile, auth);
-            incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
           } catch (err) {
             profilePickerStatus.textContent = err.message || 'Something went wrong.';
             profilePickerStatus.className = 'profile-picker-status error';
@@ -1678,7 +1686,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Port with the new profile
       await portWithProfile(profile, auth);
-      incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_me_pro').catch(function () {});
     } catch (err) {
       crumb('profile_save_failed', { error: (err.message || '').substring(0, 200) });
       profileCustomizeStatus.textContent = err.message || 'Failed to save. Try again.';
@@ -2234,15 +2241,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('Extracting conversation...');
 
     try {
-      // Usage gating check
+      // Usage gating — atomic check + increment
       var auth = await ensureAuthenticated();
-      var usageResult = await checkUsageAllowed(auth.idToken, auth.firebaseUid, _userTier);
+      var usageResult = await useFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro');
       if (!usageResult.allowed) {
         proChatBtn.disabled = false;
         setStatus('');
         showUsageBlocked(usageResult, 'port_my_chat_pro');
         return;
       }
+      if (usageResult.warning) showUsageWarning(usageResult.warning);
 
       // Step 1: Get active tab
       const tabs = await new Promise(function (resolve) {
@@ -2430,7 +2438,6 @@ document.addEventListener('DOMContentLoaded', () => {
       // Step 7: Render review
       renderProReview(_proData);
       crumb('pro_rendered');
-      incrementUsage(auth.idToken, auth.firebaseUid, _userTier, 'port_my_chat_pro').catch(function () {});
 
       trackEvent('pro_brief_generated', {
         sourcePlatform: sourcePlatform,
@@ -2588,14 +2595,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Second Opinion ────────────────────────────────────────────────────────
   async function triggerSecondOpinion() {
-    // Usage gating check
+    // Usage gating — atomic check + increment
+    var soAuth;
     try {
-      var soAuth = await ensureAuthenticated();
-      var soUsageResult = await checkUsageAllowed(soAuth.idToken, soAuth.firebaseUid, _userTier);
+      soAuth = await ensureAuthenticated();
+      var soUsageResult = await useFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion');
       if (!soUsageResult.allowed) {
         showUsageBlocked(soUsageResult, 'second_opinion');
         return;
       }
+      if (soUsageResult.warning) showUsageWarning(soUsageResult.warning);
     } catch (e) {
       setStatus('Auth failed. Try signing in.', true);
       return;
@@ -2725,8 +2734,6 @@ document.addEventListener('DOMContentLoaded', () => {
         comparison: compareData,
         durationMs: Date.now() - _soStartTime,
       });
-      incrementUsage(soAuth.idToken, soAuth.firebaseUid, _userTier, 'second_opinion').catch(function () {});
-
     } catch (err) {
       stopSuggestionCycle();
       soResultsEl.classList.remove('so-loading');

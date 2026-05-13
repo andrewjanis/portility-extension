@@ -120,6 +120,284 @@ async function getFirebaseAccessToken(env) {
   return tokenData.access_token;
 }
 
+// ─── Firebase ID Token verification ─────────────────────────────────────────
+async function verifyFirebaseIdToken(idToken, firebaseApiKey) {
+  var resp = await fetch(
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + firebaseApiKey,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: idToken }) }
+  );
+  if (!resp.ok) throw new Error('Invalid Firebase ID token');
+  var data = await resp.json();
+  if (!data.users || !data.users.length) throw new Error('No user found');
+  return data.users[0].localId;
+}
+
+// ─── Usage tiers ────────────────────────────────────────────────────────────
+var USAGE_TIERS = {
+  free:  { limit: 10, monthly: false },
+  paid:  { limit: 50, monthly: true },
+  paid2: { limit: 150, monthly: true },
+  paid3: { limit: 250, monthly: true },
+};
+var UPGRADE_URLS = {
+  free:  'https://www.portility.ai/pricing',
+  paid:  'STRIPE_TIER2_CHECKOUT_URL',
+  paid2: 'STRIPE_TIER3_CHECKOUT_URL',
+  paid3: null,
+};
+
+// ─── Firestore helpers for /use ─────────────────────────────────────────────
+function computeWindowKey(billingAnchorDate) {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth();
+  if (billingAnchorDate) {
+    var anchor = new Date(billingAnchorDate);
+    var anchorDay = anchor.getDate();
+    if (now.getDate() < anchorDay) {
+      month -= 1;
+      if (month < 0) { month = 11; year -= 1; }
+    }
+  }
+  var monthStr = String(month + 1).padStart(2, '0');
+  return year + '-' + monthStr;
+}
+
+function migrateOldUsage(fields, tier, tierConfig) {
+  if (!tierConfig.monthly) {
+    // Free tier: read lifetimeFreeUsed
+    return parseInt(fields.lifetimeFreeUsed?.integerValue || '0', 10);
+  }
+  // Paid tier: read monthlyUsage[windowKey]
+  var anchorDate = fields.billingAnchorDate?.timestampValue || null;
+  var windowKey = computeWindowKey(anchorDate);
+  var mapFields = fields.monthlyUsage?.mapValue?.fields;
+  if (mapFields && mapFields[windowKey]) {
+    return parseInt(mapFields[windowKey].integerValue || '0', 10);
+  }
+  return 0;
+}
+
+async function firestorePatchFields(accessToken, docUrl, fieldsObj, fieldPaths) {
+  var qs = fieldPaths.map(function (p) { return 'updateMask.fieldPaths=' + p; }).join('&');
+  var resp = await fetch(docUrl + '?' + qs, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: fieldsObj }),
+  });
+  if (!resp.ok) {
+    throw new Error('Firestore patch failed: ' + resp.status);
+  }
+  return resp.json();
+}
+
+function trackUsageEvent(env, distinctId, params) {
+  if (!env.POSTHOG_API_KEY) return;
+  fetch('https://app.posthog.com/capture/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: env.POSTHOG_API_KEY,
+      event: 'pro_feature_used',
+      distinct_id: distinctId || 'worker-anonymous',
+      properties: {
+        feature: params.feature,
+        tier: params.tier,
+        used: params.used,
+        limit: params.limit,
+        $lib: 'portility-worker',
+      },
+      timestamp: new Date().toISOString(),
+    }),
+  }).catch(function () {});
+}
+
+// ─── POST /use — atomic usage check + increment ────────────────────────────
+async function handleUse(request, env, corsHeaders) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders });
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+      status: 400, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var claimedUid = body.firebaseUid;
+  var feature = body.feature || 'unknown';
+
+  if (!claimedUid) {
+    return new Response(JSON.stringify({ error: 'Missing firebaseUid' }), {
+      status: 400, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  // Verify Firebase ID token
+  var authHeader = request.headers.get('Authorization') || '';
+  var idToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (!idToken) {
+    return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseIdToken(idToken, env.FIREBASE_API_KEY);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid token: ' + e.message }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  if (verifiedUid !== claimedUid) {
+    return new Response(JSON.stringify({ error: 'UID mismatch' }), {
+      status: 403, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  // Get service account access token
+  var accessToken = await getFirebaseAccessToken(env);
+  var docUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid;
+
+  // Read user doc
+  var docResp = await fetch(docUrl, {
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+  });
+
+  var fields = {};
+  if (docResp.ok) {
+    var doc = await docResp.json();
+    fields = doc.fields || {};
+  }
+
+  var tier = fields.tier?.stringValue || 'free';
+  var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
+  var limit = tierConfig.limit;
+
+  // Determine current usage_count — with lazy migration from old schema
+  var usageCount;
+  var needsMigration = false;
+
+  if (fields.usage_count !== undefined) {
+    usageCount = parseInt(fields.usage_count.integerValue || '0', 10);
+  } else {
+    // Old schema — migrate
+    usageCount = migrateOldUsage(fields, tier, tierConfig);
+    needsMigration = true;
+  }
+
+  // Check reset_date for paid tiers
+  var resetDate = fields.reset_date?.timestampValue || null;
+  var now = new Date();
+
+  if (tierConfig.monthly && resetDate && now > new Date(resetDate)) {
+    // Billing cycle has passed — reset
+    usageCount = 0;
+    // Write reset immediately (reset_date will be updated by next invoice.paid webhook)
+    await firestorePatchFields(accessToken, docUrl, {
+      usage_count: { integerValue: '0' },
+    }, ['usage_count']);
+  }
+
+  // Check limit
+  if (usageCount >= limit) {
+    return new Response(JSON.stringify({
+      allowed: false,
+      used: usageCount,
+      limit: limit,
+      tier: tier,
+      upgradeUrl: UPGRADE_URLS[tier] !== undefined ? UPGRADE_URLS[tier] : null,
+    }), {
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  // Atomic increment via Firestore commit with fieldTransforms
+  var commitUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';
+
+  var commitBody = {
+    writes: [{
+      transform: {
+        document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid,
+        fieldTransforms: [{
+          fieldPath: 'usage_count',
+          increment: { integerValue: '1' },
+        }],
+      },
+    }],
+  };
+
+  var commitResp = await fetch(commitUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(commitBody),
+  });
+
+  if (!commitResp.ok) {
+    var errText = await commitResp.text();
+    return new Response(JSON.stringify({ error: 'Increment failed: ' + errText }), {
+      status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var newUsed = usageCount + 1;
+
+  // If migrating, also write the usage_count baseline and reset_date
+  if (needsMigration) {
+    var migrateFields = { usage_count: { integerValue: String(newUsed) } };
+    var migratePaths = ['usage_count'];
+    if (tierConfig.monthly && !resetDate) {
+      // Set a reset_date from billingAnchorDate if available, otherwise leave null
+      var anchorTs = fields.billingAnchorDate?.timestampValue;
+      if (anchorTs) {
+        // Calculate next reset: anchor day in the next month
+        var anchor = new Date(anchorTs);
+        var nextReset = new Date(now.getFullYear(), now.getMonth() + 1, anchor.getDate());
+        if (nextReset <= now) nextReset.setMonth(nextReset.getMonth() + 1);
+        migrateFields.reset_date = { timestampValue: nextReset.toISOString() };
+        migratePaths.push('reset_date');
+      }
+    }
+    await firestorePatchFields(accessToken, docUrl, migrateFields, migratePaths).catch(function () {});
+  }
+
+  // 80% warning
+  var warning = null;
+  if (newUsed >= limit * 0.8) {
+    warning = {
+      message: 'You\'ve used ' + newUsed + ' of ' + limit + ' uses' + (tierConfig.monthly ? ' this month.' : '.'),
+      used: newUsed,
+      limit: limit,
+      tier: tier,
+    };
+  }
+
+  // Fire PostHog event
+  trackUsageEvent(env, claimedUid, { feature: feature, tier: tier, used: newUsed, limit: limit });
+
+  return new Response(JSON.stringify({
+    allowed: true,
+    used: newUsed,
+    limit: limit,
+    tier: tier,
+    warning: warning,
+  }), {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
 async function handleStripeWebhook(request, env) {
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const body = await request.text();
@@ -157,29 +435,64 @@ async function handleStripeWebhook(request, env) {
         console.error('[Webhook] Firestore tier write failed:', firestoreResp.status, await firestoreResp.text());
       }
 
-      // Set billingAnchorDate if not already present
+      // Set reset_date + usage_count from Stripe subscription
       try {
-        const userDoc = await fetch(userDocUrl + '?mask.fieldPaths=billingAnchorDate', {
-          headers: { 'Authorization': 'Bearer ' + accessToken },
-        }).then(r => r.json());
-
-        if (!userDoc.fields?.billingAnchorDate) {
-          await fetch(userDocUrl + '?updateMask.fieldPaths=billingAnchorDate', {
+        if (session.subscription) {
+          const sub = await stripe.subscriptions.retrieve(session.subscription);
+          const resetDate = new Date(sub.current_period_end * 1000).toISOString();
+          await fetch(userDocUrl + '?updateMask.fieldPaths=reset_date&updateMask.fieldPaths=usage_count', {
             method: 'PATCH',
             headers: {
               'Authorization': 'Bearer ' + accessToken,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              fields: { billingAnchorDate: { timestampValue: new Date().toISOString() } },
+              fields: {
+                reset_date: { timestampValue: resetDate },
+                usage_count: { integerValue: '0' },
+              },
             }),
           });
         }
-      } catch (anchorErr) {
-        console.error('[Webhook] billingAnchorDate write failed:', anchorErr.message);
+      } catch (resetErr) {
+        console.error('[Webhook] reset_date write failed:', resetErr.message);
       }
     }
   }
+
+  // Handle invoice.paid — reset usage on billing cycle renewal
+  if (event.type === 'invoice.paid') {
+    const invoice = event.data.object;
+    const subscriptionId = invoice.subscription;
+    if (subscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        const firebaseUID = sub.metadata?.firebase_uid;
+        if (firebaseUID) {
+          const accessToken = await getFirebaseAccessToken(env);
+          const userDocUrl = 'https://firestore.googleapis.com/v1/projects/' +
+            env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + firebaseUID;
+          const resetDate = new Date(sub.current_period_end * 1000).toISOString();
+          await fetch(userDocUrl + '?updateMask.fieldPaths=reset_date&updateMask.fieldPaths=usage_count', {
+            method: 'PATCH',
+            headers: {
+              'Authorization': 'Bearer ' + accessToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              fields: {
+                reset_date: { timestampValue: resetDate },
+                usage_count: { integerValue: '0' },
+              },
+            }),
+          });
+        }
+      } catch (invoiceErr) {
+        console.error('[Webhook] invoice.paid reset failed:', invoiceErr.message);
+      }
+    }
+  }
+
   return new Response('Webhook received', { status: 200 });
 }
 
@@ -189,7 +502,7 @@ export default {
     var corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Portility-Distinct-Id',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Portility-Distinct-Id, Authorization',
     };
 
     // Handle preflight
@@ -215,6 +528,8 @@ export default {
         return await handleSecondOpinion(request, env, corsHeaders);
       } else if (path === '/compare') {
         return await handleCompare(request, env, corsHeaders);
+      } else if (path === '/use') {
+        return await handleUse(request, env, corsHeaders);
       } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
         return handleStripeWebhook(request, env);
       } else {

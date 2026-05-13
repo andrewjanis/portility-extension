@@ -318,7 +318,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Get sorted keys (most recent first), limit to 12
     var keys = Object.keys(history).sort().reverse().slice(0, 12);
-    if (keys.length === 0) return;
+    if (keys.length === 0) {
+      var note = document.createElement('div');
+      note.className = 'usage-history-row';
+      note.style.color = '#9ca3af';
+      note.textContent = 'Usage resets each billing cycle.';
+      usageHistoryEl.appendChild(note);
+      return;
+    }
 
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
