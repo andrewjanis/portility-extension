@@ -2354,9 +2354,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
       if (!proxyBase) throw new Error('Proxy URL not configured.');
 
+      var phDistinctId = await getDistinctId();
       var summaryPromise = fetch(proxyBase + '/summarize-pro', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': phDistinctId },
         body: JSON.stringify({
           conversation: extractResponse.text,
           assets: extractResponse.assets || [],
@@ -2643,9 +2644,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Step 3: Generate summary via /summarize-pro
       updateDialStatus('Analyzing conversation\u2026');
+      var soDistinctId = await getDistinctId();
       var summaryResp = await fetch(proxyBase + '/summarize-pro', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
         body: JSON.stringify({
           conversation: extractResponse.text,
           assets: extractResponse.assets || [],
@@ -2692,7 +2694,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       var soResp = await fetch(proxyBase + '/second-opinion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
         body: JSON.stringify({ brief: artifact, platform: platform }),
       });
 
@@ -2705,7 +2707,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       var compareResp = await fetch(proxyBase + '/compare', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
         body: JSON.stringify({ original: artifact, secondOpinion: soData.text }),
       });
 
@@ -2750,13 +2752,20 @@ document.addEventListener('DOMContentLoaded', () => {
   var _soResultData = null;
   var SO_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  // Check for cached SO result on popup open
+  // Check for cached SO result on popup open (invalidate if tab URL changed)
   chrome.storage.local.get('so_cached_result', function (result) {
     var cached = result.so_cached_result;
     if (cached && cached.data && cached.timestamp && (Date.now() - cached.timestamp < SO_CACHE_TTL)) {
-      // Restore the cached results
-      showSecondOpinionResults(cached.data);
-      soNewBtn.style.display = 'inline';
+      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        var currentUrl = (tabs && tabs[0]) ? tabs[0].url : '';
+        if (cached.tabUrl && cached.tabUrl !== currentUrl) {
+          // Page changed — clear cache and lastProBrief, stay on home screen
+          chrome.storage.local.remove(['so_cached_result', 'lastProBrief']);
+          return;
+        }
+        showSecondOpinionResults(cached.data);
+        soNewBtn.style.display = 'inline';
+      });
     }
   });
 
@@ -3054,18 +3063,22 @@ document.addEventListener('DOMContentLoaded', () => {
     screen1.style.display = 'none';
     soResultsEl.style.display = 'block';
 
-    // Cache results for 5-minute persistence
-    chrome.storage.local.set({
-      so_cached_result: {
-        data: {
-          originalBrief: data.originalBrief || '',
-          secondOpinion: data.secondOpinion || '',
-          source: data.source || '',
-          platform: data.platform || '',
-          comparison: data.comparison || {},
-        },
-        timestamp: Date.now(),
-      }
+    // Cache results for 5-minute persistence (with tab URL for navigation invalidation)
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      var tabUrl = (tabs && tabs[0]) ? tabs[0].url : '';
+      chrome.storage.local.set({
+        so_cached_result: {
+          data: {
+            originalBrief: data.originalBrief || '',
+            secondOpinion: data.secondOpinion || '',
+            source: data.source || '',
+            platform: data.platform || '',
+            comparison: data.comparison || {},
+          },
+          timestamp: Date.now(),
+          tabUrl: tabUrl,
+        }
+      });
     });
   }
 
