@@ -127,7 +127,11 @@ async function verifyFirebaseIdToken(idToken, firebaseApiKey) {
     { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idToken: idToken }) }
   );
-  if (!resp.ok) throw new Error('Invalid Firebase ID token');
+  if (!resp.ok) {
+    var errBody = await resp.json().catch(function () { return {}; });
+    var errMsg = (errBody.error && errBody.error.message) ? errBody.error.message : ('HTTP ' + resp.status);
+    throw new Error('Firebase token verification failed: ' + errMsg);
+  }
   var data = await resp.json();
   if (!data.users || !data.users.length) throw new Error('No user found');
   return data.users[0].localId;

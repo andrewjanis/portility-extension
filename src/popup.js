@@ -2606,7 +2606,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (soUsageResult.warning) showUsageWarning(soUsageResult.warning);
     } catch (e) {
-      setStatus('Auth failed. Try signing in.', true);
+      setStatus(e.message || 'Auth failed. Try signing in.', true);
       return;
     }
 
