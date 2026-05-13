@@ -438,6 +438,10 @@ async function handleStripeWebhook(request, env) {
       // Set reset_date + usage_count from Stripe subscription
       try {
         if (session.subscription) {
+          // Copy firebase_uid onto the subscription so invoice.paid can find the user
+          await stripe.subscriptions.update(session.subscription, {
+            metadata: { firebase_uid: firebaseUID, tier: tierValue },
+          });
           const sub = await stripe.subscriptions.retrieve(session.subscription);
           const resetDate = new Date(sub.current_period_end * 1000).toISOString();
           await fetch(userDocUrl + '?updateMask.fieldPaths=reset_date&updateMask.fieldPaths=usage_count', {
