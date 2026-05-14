@@ -142,13 +142,19 @@ var USAGE_TIERS = {
   free:  { limit: 10, monthly: false },
   paid:  { limit: 50, monthly: true },
   paid2: { limit: 150, monthly: true },
-  paid3: { limit: 250, monthly: true },
 };
 var UPGRADE_URLS = {
   free:  'https://www.portility.ai/pricing',
-  paid:  'STRIPE_TIER2_CHECKOUT_URL',
-  paid2: 'STRIPE_TIER3_CHECKOUT_URL',
-  paid3: null,
+  paid:  'https://www.portility.ai/pricing',
+  paid2: null,
+};
+
+// Stripe Price ID → tier mapping
+var PRICE_TO_TIER = {
+  'price_1TUBYrCJMK2eGD36aLlU5Z0a': 'paid',   // $5/month
+  'price_1TUBbZCJMK2eGD36B3lhLzFk': 'paid',   // $50/year
+  'price_1TX0AoCJMK2eGD36UBbK3WFD': 'paid2',  // $10/month
+  'price_1TX0BGCJMK2eGD3656Rv2pOh': 'paid2',  // $100/year
 };
 
 // ─── Firestore helpers for /use ─────────────────────────────────────────────
@@ -490,8 +496,19 @@ async function handleStripeWebhook(request, env) {
       // Get a fresh access token from service account
       const accessToken = await getFirebaseAccessToken(env);
 
-      // Determine tier from Stripe metadata (defaults to 'paid' for backwards compat)
-      const tierValue = session.metadata.tier || 'paid';
+      // Determine tier from subscription price ID, falling back to metadata
+      var tierValue = session.metadata.tier || 'paid';
+      if (session.subscription) {
+        try {
+          const subForTier = await stripe.subscriptions.retrieve(session.subscription, { expand: ['items.data.price'] });
+          const priceId = subForTier.items && subForTier.items.data[0] && subForTier.items.data[0].price.id;
+          if (priceId && PRICE_TO_TIER[priceId]) {
+            tierValue = PRICE_TO_TIER[priceId];
+          }
+        } catch (e) {
+          console.error('[Webhook] Price lookup failed:', e.message);
+        }
+      }
 
       // Write tier to Firestore via REST API
       const userDocUrl = 'https://firestore.googleapis.com/v1/projects/' +

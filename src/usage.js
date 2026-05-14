@@ -12,14 +12,12 @@ var USAGE_TIERS = {
   free:  { limit: 10, monthly: false, label: 'Free' },
   paid:  { limit: 50, monthly: true, label: 'Pro' },
   paid2: { limit: 150, monthly: true, label: 'Pro Plus' },
-  paid3: { limit: 250, monthly: true, label: 'Pro Max' },
 };
 
 var UPGRADE_URLS = {
   free:  'https://www.portility.ai/pricing',
-  paid:  'STRIPE_TIER2_CHECKOUT_URL',   // placeholder — replace with real URL
-  paid2: 'STRIPE_TIER3_CHECKOUT_URL',   // placeholder — replace with real URL
-  paid3: null,                           // max tier — no upgrade available
+  paid:  'https://www.portility.ai/pricing',
+  paid2: null,
 };
 
 var USAGE_PROJECT_ID = 'portility';
