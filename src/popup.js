@@ -2651,10 +2651,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!extractResponse.text) throw new Error('No conversation text found on page.');
 
-      // Step 3: Generate summary via /summarize-pro
+      // Steps 3-5: Summarize and second-opinion in parallel
       updateDialStatus('Analyzing conversation\u2026');
       var soDistinctId = await getDistinctId();
-      var summaryResp = await fetch(proxyBase + '/summarize-pro', {
+
+      var summarizePromise = fetch(proxyBase + '/summarize-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
         body: JSON.stringify({
@@ -2663,9 +2664,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }),
       });
 
+      var secondOpinionPromise = fetch(proxyBase + '/second-opinion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
+        body: JSON.stringify({ brief: extractResponse.text, platform: platform }),
+      });
+
+      var [summaryResp, soResp] = await Promise.all([summarizePromise, secondOpinionPromise]);
+
       if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
       var summaryData = await summaryResp.json();
       trackTokenUsage('summarize-pro', summaryData._usage);
+
+      var soData = await soResp.json();
+      if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
+      trackTokenUsage('second-opinion', soData._usage);
 
       var contentText = '';
       if (summaryData.content && summaryData.content.length > 0) {
@@ -2684,7 +2697,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       var artifact = parsed.brief || contentText;
 
-      // Step 4: Compress any embedded base64 images
+      // Compress any embedded base64 images in the summary
       var imgRegex = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
       var imgMatches = artifact.match(imgRegex);
       if (imgMatches) {
@@ -2697,19 +2710,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       }
-
-      // Step 5: POST to /second-opinion
-      updateDialStatus('Getting a second opinion\u2026');
-
-      var soResp = await fetch(proxyBase + '/second-opinion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
-        body: JSON.stringify({ brief: artifact, platform: platform }),
-      });
-
-      var soData = await soResp.json();
-      if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
-      trackTokenUsage('second-opinion', soData._usage);
 
       // Step 6: POST to /compare
       updateDialStatus('Comparing both responses\u2026');
