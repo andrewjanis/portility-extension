@@ -516,6 +516,63 @@
     }
 
     #soResults.so-loading .so-footer { display: none; }
+    #soResults.so-loading .so-likert { display: none; }
+
+    .so-likert {
+      text-align: center;
+      margin: 12px 0 8px;
+    }
+    .so-likert-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+    .so-likert-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .so-likert-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1.5px solid #d1d5db;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .so-likert-btn:hover {
+      border-color: #14b8a6;
+      color: #0d9488;
+      background: #f0fdfa;
+    }
+    .so-likert-btn.selected {
+      border-color: #14b8a6;
+      background: #14b8a6;
+      color: #fff;
+    }
+    .so-likert-btn.submitted {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    .so-likert-anchors {
+      display: flex;
+      justify-content: space-between;
+      max-width: 200px;
+      margin: 4px auto 0;
+      font-size: 9px;
+      color: #9ca3af;
+    }
+    .so-likert-status {
+      font-size: 10px;
+      color: #16a34a;
+      margin-top: 4px;
+      min-height: 14px;
+    }
 
     .so-list-row {
       font-size: 12.5px;
@@ -534,32 +591,9 @@
     .so-list-row.expanded .so-row-body { display: block; }
     .so-row-quote { font-style: italic; margin-top: 4px; padding-left: 8px; border-left: 2px solid #e5e7eb; font-size: 11px; color: #9ca3af; }
 
-    #so-status-text {
-      font-size: 12px;
-      color: #374151;
-      text-align: center;
-      margin-top: -8px;
-      margin-bottom: 8px;
-      min-height: 16px;
-      font-weight: 500;
-    }
-
-    .so-timing-note {
-      font-size: 10px;
-      color: #9ca3af;
-      text-align: center;
-      line-height: 1.4;
-      margin-bottom: 12px;
-      transition: opacity 0.4s ease;
-    }
-
-    .so-timing-note.fade-out {
-      opacity: 0;
-    }
 
     #soResults.so-loading #so-dial-svg {
-      opacity: 0.35;
-      animation: soPulse 1.8s ease-in-out infinite;
+      opacity: 0.5;
     }
 
     #soResults.so-loading .so-list-header,
@@ -571,12 +605,59 @@
       display: none;
     }
 
-    #soResults .so-timing-note { display: none; }
-    #soResults.so-loading .so-timing-note { display: block; }
 
-    @keyframes soPulse {
-      0%, 100% { opacity: 0.35; }
-      50% { opacity: 0.55; }
+    /* Step tracker */
+    .so-steps {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin-top: -6px;
+      margin-bottom: 8px;
+    }
+    .so-step {
+      font-size: 11px;
+      color: #9ca3af;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .so-step-icon {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #d1d5db;
+      flex-shrink: 0;
+    }
+    .so-step.active {
+      color: #374151;
+      font-weight: 600;
+    }
+    .so-step.active .so-step-icon {
+      background: transparent;
+      border: 2px solid #6366f1;
+      border-top-color: transparent;
+      animation: soStepSpin 0.8s linear infinite;
+    }
+    .so-step.done {
+      color: #16a34a;
+    }
+    .so-step.done .so-step-icon {
+      background: #16a34a;
+      color: #fff;
+      font-size: 8px;
+      line-height: 10px;
+      text-align: center;
+    }
+    .so-step.done .so-step-icon::after {
+      content: '\2713';
+      color: #fff;
+      font-size: 7px;
+      font-weight: 700;
+    }
+    #soResults:not(.so-loading) .so-steps { display: none; }
+    @keyframes soStepSpin {
+      to { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -793,8 +874,11 @@
       <text id="so-score-number" x="120" y="178" font-size="40" font-weight="500" fill="#D4AC0D" font-family="-apple-system,sans-serif" text-anchor="middle" dominant-baseline="middle">—</text>
     </svg>
 
-    <div id="so-status-text"></div>
-    <div class="so-timing-note" id="so-timing-note"></div>
+    <div id="so-steps" class="so-steps">
+      <div class="so-step" data-step="1"><span class="so-step-icon"></span> Reading</div>
+      <div class="so-step" data-step="2"><span class="so-step-icon"></span> Analyzing</div>
+      <div class="so-step" data-step="3"><span class="so-step-icon"></span> Comparing</div>
+    </div>
     <div id="so-score-lbl"></div>
     <div id="so-interp"></div>
 
@@ -804,10 +888,24 @@
     <div class="so-list-header differ">Where they differ</div>
     <div id="so-diff-list"></div>
 
+    <div id="so-likert" class="so-likert">
+      <div class="so-likert-label">Rate this comparison</div>
+      <div class="so-likert-row">
+        <button class="so-likert-btn" data-rating="1" title="Poor">1</button>
+        <button class="so-likert-btn" data-rating="2" title="Fair">2</button>
+        <button class="so-likert-btn" data-rating="3" title="Good">3</button>
+        <button class="so-likert-btn" data-rating="4" title="Very Good">4</button>
+        <button class="so-likert-btn" data-rating="5" title="Excellent">5</button>
+      </div>
+      <div class="so-likert-anchors">
+        <span>Poor</span><span>Excellent</span>
+      </div>
+      <div id="so-likert-status" class="so-likert-status"></div>
+    </div>
+
     <div class="so-footer">
       <div id="so-model-name" class="so-model-label"></div>
       <button id="soViewFullBtn" class="link-btn" style="font-size:10px;">View full comparison</button>
-      <button id="soRateBtn" class="link-btn" style="font-size:10px;">Rate this comparison</button>
       <button id="soNewBtn" class="link-btn" style="font-size:10px;display:none;color:#14b8a6;font-weight:600;">New Second Opinion</button>
     </div>
 

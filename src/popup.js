@@ -2617,7 +2617,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     secondOpinionBtn.disabled = true;
-    showDialLoading('Reading conversation\u2026');
+    showDialLoading();
+    updateSOStep(1);
     var _soStartTime = Date.now();
 
     try {
@@ -2651,8 +2652,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!extractResponse.text) throw new Error('No conversation text found on page.');
 
+      // Ensure "Reading" step spins for at least 3s before advancing
+      var _soStep1Elapsed = Date.now() - _soStartTime;
+      if (_soStep1Elapsed < 3000) {
+        await new Promise(function (r) { setTimeout(r, 3000 - _soStep1Elapsed); });
+      }
+
       // Steps 3-5: Summarize and second-opinion in parallel
-      updateDialStatus('Analyzing conversation\u2026');
+      updateSOStep(2);
       var soDistinctId = await getDistinctId();
 
       var summarizePromise = fetch(proxyBase + '/summarize-pro', {
@@ -2712,7 +2719,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Step 6: POST to /compare
-      updateDialStatus('Comparing both responses\u2026');
+      updateSOStep(3);
 
       var compareResp = await fetch(proxyBase + '/compare', {
         method: 'POST',
@@ -2735,7 +2742,8 @@ document.addEventListener('DOMContentLoaded', () => {
         durationMs: Date.now() - _soStartTime,
       });
     } catch (err) {
-      stopSuggestionCycle();
+      stopNeedleSweep();
+      resetSOSteps();
       soResultsEl.classList.remove('so-loading');
       soResultsEl.style.display = 'none';
       screen1.style.display = 'block';
@@ -2751,7 +2759,6 @@ document.addEventListener('DOMContentLoaded', () => {
   var soBackBtn = document.getElementById('soBackBtn');
   var soModelName = document.getElementById('so-model-name');
   var soViewFullBtn = document.getElementById('soViewFullBtn');
-  var soRateBtn = document.getElementById('soRateBtn');
   var soNewBtn = document.getElementById('soNewBtn');
   var _soCurrentScore = 0;
   var _soAnimFrame;
@@ -2977,12 +2984,18 @@ document.addEventListener('DOMContentLoaded', () => {
     badge.style.color = tc[1];
     badge.style.borderColor = tc[2];
 
+    // Stop needle sweep and restore CSS transition for the snap
+    stopNeedleSweep();
+    var needleEl = document.getElementById('so-needle');
+    needleEl.style.transition = 'transform 0.9s cubic-bezier(0.34,1.2,0.64,1)';
+
     // Ensure gauge band is visible
     document.getElementById('so-gauge-band').style.opacity = '1';
+    document.getElementById('so-dial-svg').style.opacity = '1';
 
-    // Needle
+    // Needle — snap to real score
     var svgRot = -120 + (score / 100) * 240;
-    document.getElementById('so-needle').style.transform = 'rotate(' + svgRot + 'deg)';
+    needleEl.style.transform = 'rotate(' + svgRot + 'deg)';
     document.getElementById('so-needle-main').setAttribute('stroke', c.needle);
     document.getElementById('so-needle-tail').setAttribute('stroke', c.needle);
     document.getElementById('so-hub-dot').setAttribute('fill', c.needle);
@@ -3063,9 +3076,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Transition from loading to results
-    stopSuggestionCycle();
     soResultsEl.classList.remove('so-loading');
-    document.getElementById('so-status-text').textContent = '';
     setStatus('');
     screen1.style.display = 'none';
     soResultsEl.style.display = 'block';
@@ -3089,53 +3100,83 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ── While-you-wait suggestions ──────────────────────────────────────────────
-  var _soWaitSuggestions = [
-    'Take 3 slow, deep breaths.',
-    'Close your eyes for 10 seconds.',
-    'Stand up and stretch your arms overhead.',
-    'Roll your shoulders back 5 times.',
-    'Look away from the screen at something far away.',
-    'Drink some water — stay hydrated!',
-    'Unclench your jaw and relax your face.',
-    'Wiggle your fingers and toes.',
-    'Sit up straight and fix your posture.',
-    'Take a big breath in through your nose, out through your mouth.',
-    'Give your eyes a break — blink 10 times slowly.',
-    'Squeeze your hands into fists, then release.',
-    'Drop your shoulders away from your ears.',
-    'Smile — even a fake one boosts your mood.',
-    'Put your feet flat on the floor and feel grounded.',
-  ];
-  var _soSuggestionTimer = null;
+  var _soSweepFrame = null;
 
-  function startSuggestionCycle() {
-    var noteEl = document.getElementById('so-timing-note');
-    var pool = _soWaitSuggestions.slice();
-    // Shuffle
-    for (var i = pool.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
-    }
-    var idx = 0;
-    function show() {
-      noteEl.classList.remove('fade-out');
-      noteEl.textContent = 'While you wait\u2026 ' + pool[idx % pool.length];
-      idx++;
-    }
-    show();
-    _soSuggestionTimer = setInterval(function () {
-      noteEl.classList.add('fade-out');
-      setTimeout(function () {
-        show();
-      }, 400);
-    }, 6000);
+  function updateSOStep(stepNum) {
+    var steps = document.querySelectorAll('#so-steps .so-step');
+    steps.forEach(function (el) {
+      var s = parseInt(el.getAttribute('data-step'), 10);
+      el.classList.remove('active', 'done');
+      if (s < stepNum) el.classList.add('done');
+      else if (s === stepNum) el.classList.add('active');
+    });
   }
 
-  function stopSuggestionCycle() {
-    if (_soSuggestionTimer) {
-      clearInterval(_soSuggestionTimer);
-      _soSuggestionTimer = null;
+  function resetSOSteps() {
+    document.querySelectorAll('#so-steps .so-step').forEach(function (el) {
+      el.classList.remove('active', 'done');
+    });
+  }
+
+  // Map a needle degree to the zone color (same thresholds as soZoneColors)
+  function sweepNeedleColor(deg) {
+    // deg -120 = score 0, deg +120 = score 100
+    var score = (deg + 120) / 240 * 100;
+    if (score < 34) return '#fa000c';
+    if (score < 67) return '#FFD348';
+    return '#41f531';
+  }
+
+  function startNeedleSweep() {
+    var needle = document.getElementById('so-needle');
+    var needleMain = document.getElementById('so-needle-main');
+    var needleTail = document.getElementById('so-needle-tail');
+    var hubDot = document.getElementById('so-hub-dot');
+    var scoreEl = document.getElementById('so-score-number');
+    var minDeg = -120;
+    var maxDeg = 120;
+    var halfCycle = 10000; // 10s per sweep direction
+    var startTime = null;
+    var lastColor = '';
+
+    // Disable CSS transition so RAF controls the needle directly
+    needle.style.transition = 'none';
+
+    function tick(ts) {
+      if (!startTime) startTime = ts;
+      var elapsed = ts - startTime;
+      // Triangle wave: 0→1 over halfCycle, then 1→0 over halfCycle, repeat
+      var cycle = elapsed % (halfCycle * 2);
+      var p = cycle < halfCycle ? cycle / halfCycle : 2 - cycle / halfCycle;
+      // Smooth with ease-in-out
+      var eased = p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p);
+
+      var deg = minDeg + (maxDeg - minDeg) * eased;
+      needle.style.transform = 'rotate(' + deg + 'deg)';
+
+      // Track score number with needle position
+      var score = Math.round((deg - minDeg) / (maxDeg - minDeg) * 100);
+      scoreEl.textContent = score;
+
+      // Update needle + score color to match the zone
+      var c = sweepNeedleColor(deg);
+      if (c !== lastColor) {
+        needleMain.setAttribute('stroke', c);
+        needleTail.setAttribute('stroke', c);
+        hubDot.setAttribute('fill', c);
+        scoreEl.setAttribute('fill', c);
+        lastColor = c;
+      }
+
+      _soSweepFrame = requestAnimationFrame(tick);
+    }
+    _soSweepFrame = requestAnimationFrame(tick);
+  }
+
+  function stopNeedleSweep() {
+    if (_soSweepFrame) {
+      cancelAnimationFrame(_soSweepFrame);
+      _soSweepFrame = null;
     }
   }
 
@@ -3144,6 +3185,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('so-score-number').textContent = '\u2026';
     document.getElementById('so-score-number').setAttribute('fill', '#d1d5db');
     document.getElementById('so-score-lbl').textContent = '';
+    document.getElementById('so-needle').style.transition = 'none';
     document.getElementById('so-needle').style.transform = 'rotate(-120deg)';
     document.getElementById('so-needle-main').setAttribute('stroke', '#d1d5db');
     document.getElementById('so-needle-tail').setAttribute('stroke', '#d1d5db');
@@ -3152,14 +3194,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('so-agree-list').innerHTML = '';
     document.getElementById('so-diff-list').innerHTML = '';
     document.getElementById('so-interp').textContent = '';
-    document.getElementById('so-status-text').textContent = statusText || '';
+    document.getElementById('so-likert-status').textContent = '';
+    document.querySelectorAll('.so-likert-btn').forEach(function (b) {
+      b.classList.remove('selected', 'submitted');
+    });
     _soCurrentScore = 0;
 
-    // Add loading class for pulse + hide lists
+    // Reset steps
+    resetSOSteps();
+
+    // Add loading class + hide lists
     soResultsEl.classList.add('so-loading');
 
-    // Start rotating suggestions
-    startSuggestionCycle();
+    // Start the slow needle sweep
+    startNeedleSweep();
 
     // Show the results screen
     screen1.style.display = 'none';
@@ -3167,79 +3215,30 @@ document.addEventListener('DOMContentLoaded', () => {
     expandPopup();
   }
 
-  function updateDialStatus(statusText) {
-    document.getElementById('so-status-text').textContent = statusText || '';
-  }
 
   // Expose for console testing (remove before release)
   window._testSO = showSecondOpinionResults;
 
-  soViewFullBtn.addEventListener('click', function () {
+  soViewFullBtn.addEventListener('click', async function () {
     if (!_soResultData) return;
     var rd = _soResultData;
-    var cmp = rd.comparison || {};
-    var platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
-    var ai1Name = platformNames[rd.platform] || rd.platform || 'AI 1';
-    var ai2Name = platformNames[rd.source] || rd.source || 'AI 2';
+    var fcAuth;
+    try { fcAuth = await ensureAuthenticated(); } catch (e) { fcAuth = null; }
+    var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
 
-    // Combine agreements + divergences into themes (max 5)
-    var allPoints = [];
-    (cmp.agreements || []).forEach(function (a) { allPoints.push({ text: a, type: 'agree' }); });
-    (cmp.divergences || []).forEach(function (d) { allPoints.push({ text: d, type: 'differ' }); });
-    var themes = allPoints.slice(0, 5);
-
-    // Build table rows
-    var rows = themes.map(function (item) {
-      var parts = soSplitTitleBody(item.text);
-      var q1 = soFindRelevantQuote(rd.originalBrief, parts.title);
-      var q2 = soFindRelevantQuote(rd.secondOpinion, parts.title);
-      var tagColor = item.type === 'agree' ? '#16a34a' : '#dc2626';
-      var tagBg = item.type === 'agree' ? '#f0fdf4' : '#fef2f2';
-      var tagLabel = item.type === 'agree' ? 'Agree' : 'Differ';
-      return '<tr>' +
-        '<td class="theme-cell"><strong>' + escHtml(parts.title) + '</strong>' +
-          '<span class="theme-tag" style="color:' + tagColor + ';background:' + tagBg + '">' + tagLabel + '</span>' +
-          '<div class="theme-desc">' + escHtml(parts.summary) + '</div></td>' +
-        '<td class="quote-cell"><div class="quote-text">' + escHtml(q1 || 'No specific mention found.') + '</div></td>' +
-        '<td class="quote-cell"><div class="quote-text">' + escHtml(q2 || 'No specific mention found.') + '</div></td>' +
-      '</tr>';
-    }).join('');
-
-    var score = Math.round(cmp.agreement_score || 0);
-    var interpretation = cmp.interpretation || '';
-
-    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Second Opinion — Portility</title>' +
-      '<style>' +
-        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;max-width:900px;margin:0 auto;padding:32px 24px;color:#111;line-height:1.6}' +
-        'h1{font-size:20px;font-weight:700;margin-bottom:4px}' +
-        '.subtitle{font-size:13px;color:#6b7280;margin-bottom:20px}' +
-        '.summary{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#374151;line-height:1.6}' +
-        '.score-badge{display:inline-block;font-weight:700;font-size:13px;padding:3px 10px;border-radius:20px;margin-right:8px}' +
-        'table{width:100%;border-collapse:collapse;margin-top:8px}' +
-        'thead th{text-align:left;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:2px solid #e5e7eb;background:#f9fafb}' +
-        'thead th.ai-col{width:30%}' +
-        'tbody tr{border-bottom:1px solid #f3f4f6}' +
-        'tbody tr:hover{background:#fafbfc}' +
-        '.theme-cell{padding:14px;vertical-align:top;width:40%}' +
-        '.theme-cell strong{font-size:14px;color:#111;display:block;margin-bottom:4px}' +
-        '.theme-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;display:inline-block;margin-bottom:6px}' +
-        '.theme-desc{font-size:12px;color:#6b7280;line-height:1.5}' +
-        '.quote-cell{padding:14px;vertical-align:top;font-size:13px;color:#374151;line-height:1.55}' +
-        '.quote-text{font-style:italic;color:#4b5563}' +
-      '</style></head><body>' +
-      '<h1>Comparison</h1>' +
-      '<div class="subtitle">Agreement score: ' + score + '%</div>' +
-      '<div class="summary">' + escHtml(interpretation) + '</div>' +
-      '<table><thead><tr>' +
-        '<th>Theme</th>' +
-        '<th class="ai-col">' + escHtml(ai1Name) + '</th>' +
-        '<th class="ai-col">' + escHtml(ai2Name) + '</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table>' +
-      '</body></html>';
-
-    var blob = new Blob([html], { type: 'text/html' });
-    var url = URL.createObjectURL(blob);
-    chrome.tabs.create({ url: url });
+    var compData = {
+      originalBrief: rd.originalBrief || '',
+      secondOpinion: rd.secondOpinion || '',
+      source: rd.source || '',
+      platform: rd.platform || '',
+      comparison: rd.comparison || {},
+      idToken: fcAuth ? fcAuth.idToken : '',
+      proxyUrl: proxyBase,
+    };
+    await new Promise(function (resolve) {
+      chrome.storage.local.set({ portility_comparison_data: compData }, resolve);
+    });
+    chrome.tabs.create({ url: chrome.runtime.getURL('comparison.html') });
   });
 
   // ── Rating page ─────────────────────────────────────────────────────────────
@@ -3413,33 +3412,67 @@ document.addEventListener('DOMContentLoaded', () => {
       '</body></html>';
   }
 
-  soRateBtn.addEventListener('click', async function () {
-    if (!_soResultData) return;
-    try {
-      var auth = await ensureAuthenticated();
-      // Stash data in chrome.storage.local for the rating page to read
-      var ratingProxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
-      var ratingData = {
-        originalBrief: _soResultData.originalBrief,
-        secondOpinion: _soResultData.secondOpinion,
-        source: _soResultData.source,
-        platform: _soResultData.platform,
-        comparison: _soResultData.comparison,
-        idToken: auth.idToken,
-        firebaseUid: auth.firebaseUid,
-        proxyUrl: ratingProxyBase,
-      };
-      await new Promise(function (resolve) {
-        chrome.storage.local.set({ portility_rating_data: ratingData }, resolve);
+  // ── Inline Likert rating ────────────────────────────────────────────────────
+  document.querySelectorAll('.so-likert-btn').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      if (!_soResultData) return;
+      var rating = parseInt(btn.dataset.rating, 10);
+
+      // Highlight selected button
+      document.querySelectorAll('.so-likert-btn').forEach(function (b) {
+        b.classList.remove('selected');
+        b.classList.add('submitted');
       });
-      chrome.tabs.create({ url: chrome.runtime.getURL('rating.html') });
-    } catch (e) {
-      console.error('[RatingPage] Failed to open:', e);
-    }
+      btn.classList.add('selected');
+
+      var statusEl = document.getElementById('so-likert-status');
+      statusEl.textContent = 'Saving\u2026';
+      statusEl.style.color = '#6b7280';
+
+      try {
+        var auth = await ensureAuthenticated();
+        var cmp = _soResultData.comparison || {};
+        var score = Math.round(cmp.agreement_score || 0);
+        var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+
+        var resp = await fetch(proxyBase + '/feedback', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + auth.idToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            platform: _soResultData.platform || '',
+            comparisonModel: _soResultData.source || '',
+            aiScore: score,
+            humanRating: String(rating),
+            humanReason: '',
+            originalBrief: _soResultData.originalBrief || '',
+            secondOpinion: _soResultData.secondOpinion || '',
+            questionType: cmp.question_type || 'analytical',
+          }),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        statusEl.textContent = 'Thanks for your feedback!';
+        statusEl.style.color = '#16a34a';
+
+        trackEvent('second_opinion_feedback_submitted', {
+          aiScore: score,
+          humanRating: rating,
+          platform: _soResultData.platform,
+        });
+      } catch (e) {
+        statusEl.textContent = 'Could not save — ' + (e.message || e);
+        statusEl.style.color = '#dc2626';
+        // Re-enable buttons so they can retry
+        document.querySelectorAll('.so-likert-btn').forEach(function (b) {
+          b.classList.remove('submitted');
+        });
+        console.error('[Likert] Save failed:', e);
+      }
+    });
   });
 
   soBackBtn.addEventListener('click', function () {
-    stopSuggestionCycle();
+    stopNeedleSweep();
     soResultsEl.classList.remove('so-loading');
     soResultsEl.style.display = 'none';
     soNewBtn.style.display = 'none';
@@ -3449,7 +3482,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   soNewBtn.addEventListener('click', function () {
-    stopSuggestionCycle();
+    stopNeedleSweep();
     soResultsEl.classList.remove('so-loading');
     soResultsEl.style.display = 'none';
     soNewBtn.style.display = 'none';
