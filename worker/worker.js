@@ -142,11 +142,13 @@ var USAGE_TIERS = {
   free:  { limit: 10, monthly: false },
   paid:  { limit: 50, monthly: true },
   paid2: { limit: 150, monthly: true },
+  paid3: { limit: Infinity, monthly: true },
 };
 var UPGRADE_URLS = {
   free:  'https://www.portility.ai/pricing',
   paid:  'https://www.portility.ai/pricing',
-  paid2: null,
+  paid2: 'https://www.portility.ai/pricing',
+  paid3: null,
 };
 
 // Stripe Price ID → tier mapping
@@ -155,6 +157,7 @@ var PRICE_TO_TIER = {
   'price_1TUBbZCJMK2eGD36B3lhLzFk': 'paid',   // $50/year
   'price_1TX0AoCJMK2eGD36UBbK3WFD': 'paid2',  // $10/month
   'price_1TX0BGCJMK2eGD3656Rv2pOh': 'paid2',  // $100/year
+  // paid3 (Unlimited) — add Stripe price IDs here when created
 };
 
 // ─── Firestore helpers for /use ─────────────────────────────────────────────
@@ -289,6 +292,10 @@ async function handleUse(request, env, corsHeaders) {
   }
 
   var tier = fields.tier?.stringValue || 'free';
+  // Allow client-side dev tier override for testing
+  if (body.tierOverride && USAGE_TIERS[body.tierOverride]) {
+    tier = body.tierOverride;
+  }
   var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
   var limit = tierConfig.limit;
 
@@ -597,7 +604,7 @@ export default {
     // CORS headers for Chrome extension
     var corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Portility-Distinct-Id, Authorization',
     };
 
@@ -606,11 +613,16 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    // GET /config — remote configuration (no auth required)
+    var url = new URL(request.url);
+    if (request.method === 'GET' && url.pathname === '/config') {
+      return handleConfig(corsHeaders);
+    }
+
     if (request.method !== 'POST') {
       return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
 
-    var url = new URL(request.url);
     var path = url.pathname;
 
     try {
@@ -628,6 +640,8 @@ export default {
         return await handleUse(request, env, corsHeaders);
       } else if (path === '/feedback') {
         return await handleFeedback(request, env, corsHeaders);
+      } else if (path === '/trainer-chat') {
+        return await handleTrainerChat(request, env, corsHeaders);
       } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
         return handleStripeWebhook(request, env);
       } else {
@@ -641,6 +655,154 @@ export default {
     }
   },
 };
+
+async function handleTrainerChat(request, env, corsHeaders) {
+  var body = await request.json();
+  var model = body.model || 'claude-sonnet-4-20250514';
+  var messages = body.messages || [];
+  var system = body.system || undefined;
+  var maxTokens = body.max_tokens || 1000;
+
+  if (!messages.length) {
+    return new Response(JSON.stringify({ error: 'No messages provided' }), {
+      status: 400,
+      headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var payload = { model: model, max_tokens: maxTokens, messages: messages };
+  if (system) payload.system = system;
+
+  var response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  var data = await response.json();
+  return new Response(JSON.stringify(data), {
+    status: response.status,
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
+function handleConfig(corsHeaders) {
+  var config = {
+    configVersion: 1,
+
+    selectors: {
+      claude: {
+        humanSelectors: [
+          '[data-testid="user-message"]',
+          '[data-testid="human-turn"]',
+          '[class*="human-turn"]',
+          '[class*="HumanTurn"]',
+        ],
+        aiClassFragment: 'font-claude-response',
+        inputSelectors: [
+          'div.ProseMirror[contenteditable="true"]',
+          'div[contenteditable="true"]',
+          'textarea',
+        ],
+        attachSelectors: [
+          'button[aria-label="Attach files"]',
+          'button[data-testid="file-upload"]',
+          '[aria-label="Upload content"]',
+        ],
+        sendSelectors: [
+          'button[aria-label="Send Message"]',
+          'button[aria-label="Send message"]',
+          'fieldset button[type="button"]:last-child',
+          'button[data-testid="send-button"]',
+        ],
+      },
+
+      chatgpt: {
+        humanSelector: '[data-message-author-role="user"]',
+        aiSelector: '[data-message-author-role="assistant"]',
+        inputSelectors: [
+          '#prompt-textarea',
+          'div[contenteditable="true"]',
+          'textarea',
+        ],
+        attachSelectors: [
+          'button[aria-label="Attach files"]',
+          '[data-testid="composer-attach-button"]',
+          'button[aria-label="Upload file"]',
+        ],
+        sendSelectors: [
+          'button[data-testid="send-button"]',
+          'button[aria-label="Send prompt"]',
+          'button[aria-label="Send"]',
+        ],
+        submitDelayMs: 1500,
+        submitDelayWithImagesMs: 2500,
+        pasteSettleMs: 800,
+      },
+
+      gemini: {
+        humanSelectors: [
+          '.user-query-text',
+          '[data-turn-role="user"]',
+          '.query-text',
+          'user-query',
+        ],
+        aiSelectors: [
+          '.model-response-text',
+          '[data-turn-role="model"]',
+          '.response-text',
+          'model-response',
+        ],
+        inputSelectors: [
+          '.ql-editor[contenteditable="true"]',
+          'rich-textarea div[contenteditable="true"]',
+          'div[contenteditable="true"]',
+          'textarea',
+        ],
+        attachSelectors: [
+          'button[aria-label="Upload file"]',
+          'uploader-button button',
+          '[aria-label="Add image"]',
+        ],
+        sendSelectors: [
+          'button.send-button',
+          'button[aria-label="Send message"]',
+          'button[aria-label="Send Message"]',
+          '.input-area button[mat-icon-button]',
+        ],
+      },
+    },
+
+    urls: {
+      destinations: {
+        claude: 'https://claude.ai/new',
+        gemini: 'https://gemini.google.com/',
+        chatgpt: 'https://chatgpt.com/',
+      },
+      featureRequest: 'https://docs.google.com/forms/d/e/1FAIpQLSeCMXd1I6-I0G0y3rl5C8a0Cl2qlrVXuwjtpa138eeaEnq_OQ/viewform?usp=dialog',
+    },
+
+    features: {
+      pmcProEnabled: true,
+      portProfileEnabled: true,
+      secondOpinionEnabled: true,
+      includeProfileDefault: true,
+      textModeDefault: 'summary',
+    },
+  };
+
+  return new Response(JSON.stringify(config), {
+    status: 200,
+    headers: Object.assign({
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, max-age=3600',
+    }, corsHeaders),
+  });
+}
 
 async function handleModerate(request, env, corsHeaders) {
   var body = await request.json();
@@ -945,21 +1107,41 @@ async function handleCompare(request, env, corsHeaders) {
   var startTime = Date.now();
 
   var systemPrompt = 'You are a neutral evaluator comparing two AI responses to the same question. ' +
-    'Judge only on accuracy, completeness, and logical consistency. ' +
+    'Judge only on substantive content — accuracy, completeness, and logical consistency. ' +
     'Do not consider tone, style, or formatting. ' +
     'Return JSON only — no preamble, no markdown, no explanation outside the JSON object.\n\n' +
     'Return this exact JSON structure:\n' +
     '{\n' +
     '  "question_type": "factual" | "subjective" | "analytical",\n' +
     '  "agreement_score": <integer 0-100>,\n' +
-    '  "agreements": ["<string>", "<string>", "<string>"],\n' +
-    '  "divergences": ["<string>", "<string>", "<string>"],\n' +
+    '  "agreements": [{"title": "<string>", "text": "<string>"}, ...],\n' +
+    '  "divergences": [{"title": "<string>", "text": "<string>"}, ...],\n' +
     '  "interpretation": "<one sentence: what the score means given the question type>"\n' +
     '}\n\n' +
     'Rules:\n' +
     '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
     '- Provide EXACTLY 3 agreements and 3 divergences\n' +
-    '- Each agreement/divergence should be 1-2 concise sentences';
+    '- "title" must be a specific, descriptive noun phrase (2-5 words) naming the TOPIC being discussed. ' +
+    'Examples: "Error page design approach", "Budget constraints", "Product recommendations", "Implementation timeline", "Wax application method". ' +
+    'NEVER use meta-phrases like "Both responses", "Response A offers", "The next logical step", "Key insight", "Main point". ' +
+    'The title must make sense as a standalone topic label without reading the text.\n' +
+    '- "text" should be 1-2 sentences explaining the specific agreement or divergence\n\n' +
+    'CRITICAL — Scoring calibration by question type:\n\n' +
+    'FACTUAL questions: Score based on whether both responses state the same facts. ' +
+    'If core facts match, score 90-100. If facts contradict, score accordingly.\n\n' +
+    'ANALYTICAL questions: You MUST distinguish between TOPIC overlap and POSITION overlap. ' +
+    'Both models discussing the same topic is NOT agreement — they must reach the same conclusion with compatible reasoning. ' +
+    'Apply these thresholds strictly:\n' +
+    '- 90-100: Models state the same conclusion with compatible supporting evidence. Rare for analytical questions.\n' +
+    '- 70-89: Models reach similar conclusions but emphasize different evidence or frameworks. This should be the DEFAULT when both models address the topic competently.\n' +
+    '- 50-69: Models address the question from different angles or frameworks, reaching compatible but non-identical conclusions.\n' +
+    '- 30-49: Models reach different conclusions or prioritize fundamentally different considerations.\n' +
+    '- 0-29: Models directly contradict each other.\n' +
+    'Be especially skeptical of high-level synthesis or "key takeaways" sections — similar-sounding summaries often mask genuinely different underlying analyses. ' +
+    'When two models both propose frameworks, check whether the frameworks lead to the same actionable conclusions, not just whether they sound similar.\n\n' +
+    'SUBJECTIVE questions: When both models express the same sentiment or values using different words, ' +
+    'credit that as agreement. Do not penalize stylistic differences on opinion-based content. ' +
+    'If both models advocate the same position with compatible reasoning, score 85-100.';
 
   var userContent = 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion;
 

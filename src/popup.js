@@ -19,14 +19,27 @@
 const POSTHOG_API_KEY = 'phc_Am8QxJfBbaSQVfEbANuaPVWWfeEWoKQEqK7QKo38Y9fD';
 const POSTHOG_HOST = 'https://app.posthog.com';
 // PROXY_URL, GOOGLE_SHEET_WEBHOOK are loaded from config.js (via script tag in popup.html)
-const FEATURE_REQUEST_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeCMXd1I6-I0G0y3rl5C8a0Cl2qlrVXuwjtpa138eeaEnq_OQ/viewform?usp=dialog';
+let FEATURE_REQUEST_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeCMXd1I6-I0G0y3rl5C8a0Cl2qlrVXuwjtpa138eeaEnq_OQ/viewform?usp=dialog';
 
-// ─── Destination URLs ─────────────────────────────────────────────────────────
-const DESTINATION_URLS = {
+// ─── Destination URLs (overridable via remote config) ─────────────────────────
+let DESTINATION_URLS = {
   claude: 'https://claude.ai/new',
   gemini: 'https://gemini.google.com/',
   chatgpt: 'https://chatgpt.com/',
 };
+
+// Override URLs and features from remote config cache (non-blocking)
+if (window.PortilityConfig) {
+  window.PortilityConfig.getRemoteUrls().then(function (urls) {
+    if (!urls) return;
+    if (urls.destinations) {
+      if (urls.destinations.claude) DESTINATION_URLS.claude = urls.destinations.claude;
+      if (urls.destinations.gemini) DESTINATION_URLS.gemini = urls.destinations.gemini;
+      if (urls.destinations.chatgpt) DESTINATION_URLS.chatgpt = urls.destinations.chatgpt;
+    }
+    if (urls.featureRequest) FEATURE_REQUEST_URL = urls.featureRequest;
+  });
+}
 
 // ─── Clipboard helper with fallback ──────────────────────────────────────────
 async function writeClipboard(text) {
@@ -126,7 +139,7 @@ async function trackEvent(eventName, properties) {
       }),
       keepalive: true,
     }).catch(() => {});
-  } catch (e) {}
+  } catch (e) { /* tracking errors are non-critical */ }
 }
 
 function trackTokenUsage(endpoint, usage) {
@@ -219,6 +232,16 @@ async function checkModeration(text) {
 
 // ─── DOM ready ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // ── Refresh remote config if stale ──────────────────────────────────────
+  if (window.PortilityConfig) {
+    window.PortilityConfig.isConfigStale().then(function (stale) {
+      if (stale) {
+        var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+        if (proxyBase) window.PortilityConfig.fetchRemoteConfig(proxyBase);
+      }
+    });
+  }
+
   // ── Element references ────────────────────────────────────────────────────
   const screen1 = document.getElementById('screen1');
   const screen2 = document.getElementById('screen2');
@@ -248,6 +271,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Instructions checkbox ────────────────────────────────────────────────
   const instructionsCheckbox = document.getElementById('instructionsCheckbox');
   const instructionsCheckboxLabel = document.getElementById('instructionsCheckboxLabel');
+  const portTextToggle = document.getElementById('portTextToggle');
+  const portSummaryRadio = document.getElementById('portSummaryRadio');
+  const portFullRadio = document.getElementById('portFullRadio');
+  const includeProfileLabel = document.getElementById('includeProfileLabel');
+  const includeProfileCheckbox = document.getElementById('includeProfileCheckbox');
+  const profileSelect = document.getElementById('profileSelect');
 
   // ── Questionnaire elements ────────────────────────────────────────────────
   const questionnaireEl = document.getElementById('questionnaire');
@@ -274,10 +303,35 @@ document.addEventListener('DOMContentLoaded', () => {
     usageBlockedOverlay.classList.remove('visible');
   });
 
+  // When a dev tier override is active, substitute the overridden tier's
+  // limits into server responses so the popup reflects the selected tier.
+  function applyDevTierToResult(result) {
+    if (!_devTierOverride) return result;
+    var tierConfig = (typeof USAGE_TIERS !== 'undefined') ? USAGE_TIERS[_devTierOverride] : null;
+    if (!tierConfig) return result;
+    var patched = Object.assign({}, result, {
+      tier: _devTierOverride,
+      limit: tierConfig.limit,
+      upgradeUrl: (typeof UPGRADE_URLS !== 'undefined') ? UPGRADE_URLS[_devTierOverride] : null,
+    });
+    // Unlimited tier is never blocked and never warned
+    if (tierConfig.limit === Infinity) {
+      patched.allowed = true;
+      patched.warning = null;
+    }
+    return patched;
+  }
+
   function showUsageBlocked(result, feature) {
-    var msg = 'You\'ve used all ' + result.limit + ' uses';
-    if (result.tier === 'free') msg += ' (lifetime).';
-    else msg += ' this month.';
+    result = applyDevTierToResult(result);
+    var msg;
+    if (result.limit === Infinity || result.limit === null) {
+      msg = 'You\'ve used ' + (result.used || 0) + ' uses (unlimited).';
+    } else {
+      msg = 'You\'ve used all ' + result.limit + ' uses';
+      if (result.tier === 'free') msg += ' (lifetime).';
+      else msg += ' this month.';
+    }
     usageBlockedMsg.textContent = msg;
 
     if (result.upgradeUrl) {
@@ -297,6 +351,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showUsageWarning(warning) {
+    warning = applyDevTierToResult(warning);
+    // No warnings for unlimited tier
+    if (warning.limit === Infinity || warning.limit === null) return;
     var banner = document.getElementById('usageWarningBanner');
     if (!banner) return;
     banner.textContent = warning.message || ('You\'ve used ' + warning.used + ' of ' + warning.limit + ' uses.');
@@ -305,9 +362,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(function () { banner.style.display = 'none'; }, 8000);
   }
 
-  // Variable to hold extracted text so we can clear it on moderation flag
-  let _extractedConversationText = null;
-
   // ── Port My Chat Pro elements ──────────────────────────────────────────
   const proChatBtn = document.getElementById('proChatBtn');
   const freeButtonsDiv = document.getElementById('free-buttons');
@@ -315,27 +369,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const upgradeBtn = document.getElementById('upgradeBtn');
   const secondOpinionBtn = document.getElementById('secondOpinionBtn');
   const portInstructionsBtnFree = document.getElementById('portInstructionsBtnFree');
-  const proReview = document.getElementById('proReview');
   const proBackBtn = document.getElementById('proBackBtn');
-  const proLoading = document.getElementById('proLoading');
-  const proContent = document.getElementById('proContent');
-  const proLoadingText = document.getElementById('proLoadingText');
   const proAssetTableBody = document.getElementById('proAssetTableBody');
-  const proAssetsSection = document.getElementById('proAssetsSection');
-  const proNoAssets = document.getElementById('proNoAssets');
   const proConfirmBtn = document.getElementById('proConfirmBtn');
   const proError = document.getElementById('proError');
   const proStatus = document.getElementById('proStatus');
 
   // ── Profile screen elements ──────────────────────────────────────────────
-  const profilePicker = document.getElementById('profilePicker');
   const profilePickerBackBtn = document.getElementById('profilePickerBackBtn');
   const profileList = document.getElementById('profileList');
   const profileNewBtn = document.getElementById('profileNewBtn');
   const profileNewBlocked = document.getElementById('profileNewBlocked');
   const profilePickerStatus = document.getElementById('profilePickerStatus');
 
-  const profileTypeScreen = document.getElementById('profileTypeScreen');
   const profileTypeBackBtn = document.getElementById('profileTypeBackBtn');
 
   const profileQuestionnaire = document.getElementById('profileQuestionnaire');
@@ -344,7 +390,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const pqPage2BackBtn = document.getElementById('pqPage2BackBtn');
   const pqPage2NextBtn = document.getElementById('pqPage2NextBtn');
 
-  const profileCustomize = document.getElementById('profileCustomize');
   const profileCustomizeBackBtn = document.getElementById('profileCustomizeBackBtn');
   const profilePreviewBadge = document.getElementById('profilePreviewBadge');
   const profileNameInput = document.getElementById('profileNameInput');
@@ -365,28 +410,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Pro state ──────────────────────────────────────────────────────────
   let _proData = null;
+  let _pmcProExtractPromise = null; // background extraction promise for PMC Pro
+  let _pmcProTab = null; // tab info for PMC Pro flow
 
   // ── User tier state ───────────────────────────────────────────────────
-  let _userTier = 'free'; // 'free' or 'paid'
-  const TIER_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-
+  let _userTier = 'free'; // 'free', 'paid', 'paid2', or 'paid3'
+  let _devTierOverride = null; // set from devTierOverride storage key
   async function checkUserTier() {
-    var cached = await new Promise(function (resolve) {
-      chrome.storage.local.get('userTier', function (result) { resolve(result.userTier); });
+    var result = await new Promise(function (resolve) {
+      chrome.storage.local.get(['devTierOverride', 'userTier'], function (data) { resolve(data); });
     });
 
-    if (cached && cached.tier) {
-      _userTier = cached.tier;
+    // devTierOverride (separate key) always wins
+    if (result.devTierOverride) {
+      _devTierOverride = result.devTierOverride;
+      _userTier = result.devTierOverride;
+    } else if (result.userTier && result.userTier.tier) {
+      _userTier = result.userTier.tier;
     }
     // else _userTier stays 'free' (the default)
     applyTierUI();
   }
 
   function refreshTierSilently(auth) {
-    // Check for dev tier override — if set, don't fetch from Firestore
-    chrome.storage.local.get('userTier', function (result) {
-      if (result.userTier && result.userTier.devOverride) {
-        _userTier = result.userTier.tier;
+    // Check for dev tier override (separate key) — if set, don't fetch from Firestore
+    chrome.storage.local.get('devTierOverride', function (result) {
+      if (result.devTierOverride) {
+        _userTier = result.devTierOverride;
         applyTierUI();
         return;
       }
@@ -410,9 +460,83 @@ document.addEventListener('DOMContentLoaded', () => {
   checkUserTier();
 
   // ── Port mode state ────────────────────────────────────────────────────
-  let _portMode = 'chat'; // 'chat', 'instructions', or 'pro_brief'
+  let _portMode = 'chat'; // 'chat', 'instructions', 'pro_brief', or 'pmc_pro'
   let _decryptedInstructions = null;
-  let _proBriefContent = null;
+
+  // ── PMC Pro settings persistence ──────────────────────────────────────
+  var PMC_SETTINGS_KEY = 'portility_pmc_pro_settings';
+
+  function savePmcSettings() {
+    var settings = {
+      textMode: portSummaryRadio.checked ? 'summary' : 'full',
+      includeProfile: includeProfileCheckbox.checked,
+      selectedProfileId: profileSelect.value || null,
+    };
+    chrome.storage.local.set({ [PMC_SETTINGS_KEY]: settings });
+  }
+
+  function restorePmcSettings() {
+    chrome.storage.local.get(PMC_SETTINGS_KEY, function (data) {
+      var s = data[PMC_SETTINGS_KEY];
+      if (!s) return;
+      if (s.textMode === 'full') {
+        portFullRadio.checked = true;
+      } else {
+        portSummaryRadio.checked = true;
+      }
+      includeProfileCheckbox.checked = s.includeProfile !== false;
+      profileSelect.disabled = !includeProfileCheckbox.checked;
+      // selectedProfileId is applied when dropdown is populated
+    });
+  }
+
+  // Persist on change
+  portSummaryRadio.addEventListener('change', savePmcSettings);
+  portFullRadio.addEventListener('change', savePmcSettings);
+  includeProfileCheckbox.addEventListener('change', function () {
+    profileSelect.disabled = !includeProfileCheckbox.checked;
+    savePmcSettings();
+  });
+  profileSelect.addEventListener('change', savePmcSettings);
+
+  /**
+   * Populate the profile dropdown with user's profiles.
+   * Selects the saved profile or falls back to default/first.
+   */
+  function populateProfileDropdown(profiles) {
+    profileSelect.innerHTML = '';
+    if (!profiles || profiles.length === 0) {
+      var opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No profiles';
+      profileSelect.appendChild(opt);
+      profileSelect.disabled = true;
+      return;
+    }
+    for (var i = 0; i < profiles.length; i++) {
+      var p = profiles[i];
+      opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name || (p.type + ' profile');
+      profileSelect.appendChild(opt);
+    }
+    // Apply saved selection or default
+    chrome.storage.local.get(PMC_SETTINGS_KEY, function (data) {
+      var s = data[PMC_SETTINGS_KEY];
+      var savedId = s && s.selectedProfileId;
+      var hasMatch = savedId && profiles.some(function (p) { return p.id === savedId; });
+      if (hasMatch) {
+        profileSelect.value = savedId;
+      } else {
+        var defaultProfile = profiles.find(function (p) { return p.isDefault; }) || profiles[0];
+        profileSelect.value = defaultProfile.id;
+      }
+    });
+    profileSelect.disabled = !includeProfileCheckbox.checked;
+  }
+
+  // Restore settings on popup load
+  restorePmcSettings();
 
   // ── Questionnaire state (built dynamically from config) ─────────────────
   let qAnswers = {};
@@ -445,7 +569,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   initAnswers();
   let isEditMode = false;
-  let _justBuiltInstructions = null;
 
   // ── Profile state ──────────────────────────────────────────────────────
   let _cachedProfiles = null;
@@ -454,8 +577,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let _profileAnswers = {};
   let _selectedIcon = null;
   let _selectedColourIndex = 0;
-  let _selectedProfileForPort = null;
-
   // ═══════════════════════════════════════════════════════════════════════════
   // DYNAMIC QUESTIONNAIRE RENDERER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -830,8 +951,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       var instructions = buildInstructionPacket(qAnswers);
-      _justBuiltInstructions = instructions;
-
       crumb('quest_auth');
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
@@ -916,7 +1035,7 @@ document.addEventListener('DOMContentLoaded', () => {
       refreshTierSilently(auth);
 
       // Usage gating — atomic check + increment
-      var usageResult = await useFeature(auth.idToken, auth.firebaseUid, 'port_me_pro');
+      var usageResult = applyDevTierToResult(await useFeature(auth.idToken, auth.firebaseUid, 'port_me_pro'));
       if (!usageResult.allowed) {
         portInstructionsBtn.disabled = false;
         setPortStatus('');
@@ -1065,7 +1184,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Pre-select: last-used first (they're already sorted by lastUsed desc)
     var preselectedId = profiles.length > 0 ? profiles[0].id : null;
-    _selectedProfileForPort = profiles.length > 0 ? profiles[0] : null;
 
     for (var i = 0; i < profiles.length; i++) {
       var p = profiles[i];
@@ -1101,7 +1219,6 @@ document.addEventListener('DOMContentLoaded', () => {
           var items = profileList.querySelectorAll('.profile-list-item');
           for (var j = 0; j < items.length; j++) { items[j].classList.remove('selected'); }
           this.classList.add('selected');
-          _selectedProfileForPort = profile;
 
           trackEvent('portme_pro_profile_selected', { profileId: profile.id, profileType: profile.type });
           try {
@@ -1180,6 +1297,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setScreen2Status('');
     setAllDestBtnsDisabled(false);
     instructionsCheckboxLabel.style.display = 'none';
+    portTextToggle.style.display = 'none';
+    includeProfileLabel.style.display = 'none';
     exitProfileScreens();
     showScreen('screen2');
   }
@@ -1478,7 +1597,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Set name input
-    var defaults = PROFILE_TYPE_DEFAULTS[_selectedProfileType] || PROFILE_TYPE_DEFAULTS.other;
     if (_editingProfile) {
       profileNameInput.value = _editingProfile.name;
     } else {
@@ -1727,7 +1845,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function clearExtractedContext() {
-    _extractedConversationText = null;
+    // placeholder for future cleanup
   }
 
   modalOkayBtn.addEventListener('click', function () {
@@ -1843,6 +1961,8 @@ document.addEventListener('DOMContentLoaded', () => {
     screen2Label.textContent = 'Port conversation to\u2026';
     setScreen2Status('');
     setAllDestBtnsDisabled(false);
+    portTextToggle.style.display = 'none';
+    includeProfileLabel.style.display = 'none';
 
     // Show instructions checkbox only if user has completed the questionnaire
     chrome.storage.local.get('questionnaire_completed', function (data) {
@@ -1861,6 +1981,8 @@ document.addEventListener('DOMContentLoaded', () => {
   backBtn.addEventListener('click', () => {
     _portMode = 'chat';
     _decryptedInstructions = null;
+    _pmcProExtractPromise = null;
+    _pmcProTab = null;
     showScreen('screen1');
   });
 
@@ -1909,18 +2031,194 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // ── PMC Pro mode: extract (background) → optionally summarize → port ──
+    if (_portMode === 'pmc_pro') {
+      var pmcTextMode = portSummaryRadio.checked ? 'summary' : 'full';
+      crumb('pmc_pro_dest', { dest: destination, textMode: pmcTextMode });
+      try {
+        if (!_pmcProExtractPromise) {
+          throw new Error('No extraction in progress.');
+        }
+
+        // Wait for background extraction to complete
+        setScreen2Status('Extracting\u2026');
+        var extractResponse = await _pmcProExtractPromise;
+        crumb('pro_extracted', { messageCount: extractResponse.messageCount, assetCount: (extractResponse.assets || []).length });
+
+        // Moderation check
+        setScreen2Status('Checking content\u2026');
+        var moderationResult = await checkModeration(extractResponse.text);
+        crumb('pro_moderated', { flagged: moderationResult.flagged });
+        if (moderationResult.flagged) {
+          trackEvent('portility_moderation_flagged', { source: 'pmc_pro', platform: _pmcProTab.sourcePlatform });
+          showModerationModal();
+          _pmcProExtractPromise = null;
+          _pmcProTab = null;
+          return;
+        }
+
+        var portContent = extractResponse.text;
+        var images = (extractResponse.assets || []).filter(function (a) {
+          return a.type === 'image' && a.dataUrl;
+        });
+
+        // Include profile instructions if checkbox is checked
+        var includeProfile = includeProfileCheckbox.checked;
+        var profileInstructions = null;
+        if (includeProfile) {
+          try {
+            var selectedProfileId = profileSelect.value;
+            var profiles = _cachedProfiles || [];
+            var selectedProfile = profiles.find(function (p) { return p.id === selectedProfileId; });
+            if (selectedProfile && selectedProfile.answers) {
+              profileInstructions = buildProfileInstructionPacket(selectedProfile);
+            } else if (profiles.length > 0) {
+              // Fallback to default or first
+              var fallback = profiles.find(function (p) { return p.isDefault; }) || profiles[0];
+              if (fallback.answers) {
+                profileInstructions = buildProfileInstructionPacket(fallback);
+              }
+            }
+            if (!profileInstructions) {
+              profileInstructions = await fetchAndDecryptInstructions();
+            }
+          } catch (e) {
+            // Profile fetch failed — continue without it
+            crumb('pmc_pro_profile_failed', { error: (e.message || '').substring(0, 100) });
+          }
+        }
+        crumb('pmc_pro_profile', { included: !!profileInstructions });
+
+        // If "Port Summary" selected, summarize via API
+        if (pmcTextMode === 'summary') {
+          setScreen2Status('Summarizing\u2026');
+          crumb('pro_summarize');
+          var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+          if (!proxyBase) throw new Error('Proxy URL not configured.');
+
+          var phDistinctId = await getDistinctId();
+          var summaryResp = await fetch(proxyBase + '/summarize-pro', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': phDistinctId },
+            body: JSON.stringify({
+              conversation: extractResponse.text,
+              assets: extractResponse.assets || [],
+            }),
+          });
+          if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
+          var summaryData = await summaryResp.json();
+          trackTokenUsage('summarize-pro', summaryData._usage);
+          crumb('pro_summarized', { hasContent: !!(summaryData.content && summaryData.content.length) });
+
+          var contentText = '';
+          if (summaryData.content && summaryData.content.length > 0) {
+            contentText = summaryData.content[0].text || '';
+          }
+
+          // Parse structured response
+          var parsed;
+          try {
+            var jsonStr = contentText;
+            var codeBlockMatch = contentText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+            if (codeBlockMatch) jsonStr = codeBlockMatch[1];
+            parsed = JSON.parse(jsonStr);
+          } catch (e) {
+            parsed = { title: 'Project Brief', brief: contentText, assets: [] };
+          }
+
+          var mergedAssets = mergeAssets(extractResponse.assets || [], parsed.assets || []);
+          _proData = {
+            title: parsed.title || 'Project Brief',
+            brief: parsed.brief || contentText,
+            assets: mergedAssets,
+            rawConversation: extractResponse.text,
+            sourcePlatform: _pmcProTab.sourcePlatform,
+            sourceUrl: _pmcProTab.url,
+          };
+
+          // Save to IndexedDB
+          await saveProjectBrief({
+            title: _proData.title,
+            brief: _proData.brief,
+            assets: _proData.assets,
+            sourcePlatform: _proData.sourcePlatform,
+            sourceUrl: _proData.sourceUrl,
+            rawConversation: _proData.rawConversation,
+          });
+          chrome.storage.local.set({ lastProBrief: { brief: _proData.brief, timestamp: Date.now() } });
+
+          portContent = buildDownloadContent(_proData, false);
+          images = (_proData.assets || []).filter(function (a) {
+            return a.selected && a.type === 'image' && a.dataUrl;
+          });
+        }
+
+        // Prepend profile instructions if available
+        if (profileInstructions) {
+          portContent = profileInstructions + '\n\n---\n\n' + portContent;
+        }
+
+        // Port the content
+        if (destination === 'save') {
+          blob = new Blob([portContent], { type: pmcTextMode === 'summary' ? 'text/markdown' : 'text/plain' });
+          blobUrl = URL.createObjectURL(blob);
+          chrome.downloads.download({
+            url: blobUrl,
+            filename: pmcTextMode === 'summary' ? 'portility-pro-brief.md' : 'portility-conversation.txt',
+            saveAs: true,
+          }, function () {
+            URL.revokeObjectURL(blobUrl);
+          });
+          setScreen2Status('Conversation saved!');
+          crumb('pmc_pro_ported', { dest: 'save', textMode: pmcTextMode });
+          trackEvent('pmc_pro_ported', { destination: 'file', text_mode: pmcTextMode });
+        } else {
+          await writeClipboard(portContent);
+          var storagePayload = { portility_pending_paste: portContent };
+          if (images.length > 0) {
+            storagePayload.portility_pending_images = images.map(function (a) {
+              return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg' };
+            });
+          }
+          await new Promise(function (resolve) {
+            chrome.storage.local.set(storagePayload, resolve);
+          });
+          chrome.tabs.create({ url: DESTINATION_URLS[destination] });
+          var statusMsg = images.length > 0
+            ? 'Brief + ' + images.length + ' image(s) porting!'
+            : 'Conversation copied \u2014 paste it in the new tab!';
+          setScreen2Status(statusMsg);
+          crumb('pmc_pro_ported', { dest: destination, textMode: pmcTextMode });
+          trackEvent('pmc_pro_ported', { destination: destination, text_mode: pmcTextMode, imageCount: images.length });
+        }
+
+        _pmcProExtractPromise = null;
+        _pmcProTab = null;
+        _proData = null;
+      } catch (err) {
+        crumb('pmc_pro_failed', { error: (err.message || '').substring(0, 200) });
+        setScreen2Status(err.message || 'Something went wrong.', true);
+        setAllDestBtnsDisabled(false);
+        _pmcProExtractPromise = null;
+        _pmcProTab = null;
+      }
+      return;
+    }
+
     // ── Pro brief mode: port the project brief ──
     if (_portMode === 'pro_brief') {
       crumb('pro_brief_dest', { dest: destination });
       try {
-        if (!_proBriefContent) {
+        if (!_proData) {
           throw new Error('No project brief available.');
         }
 
         if (destination === 'save') {
-          var safeTitle = (_proData && _proData.title || 'brief').replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-          var blob = new Blob([_proBriefContent], { type: 'text/markdown' });
-          var blobUrl = URL.createObjectURL(blob);
+          // Embed images inline for the saved markdown file
+          var saveContent = buildDownloadContent(_proData, true);
+          var safeTitle = (_proData.title || 'brief').replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
+          blob = new Blob([saveContent], { type: 'text/markdown' });
+          blobUrl = URL.createObjectURL(blob);
           chrome.downloads.download({
             url: blobUrl,
             filename: 'portility-pro-' + (safeTitle || 'brief') + '.md',
@@ -1932,17 +2230,42 @@ document.addEventListener('DOMContentLoaded', () => {
           crumb('pro_brief_ported', { dest: 'save' });
           trackEvent('pro_brief_ported', { destination: 'file' });
         } else {
-          await writeClipboard(_proBriefContent);
-          await new Promise(function (resolve) {
-            chrome.storage.local.set({ portility_pending_paste: _proBriefContent }, resolve);
+          // For AI destinations: text brief + auto-paste images via content script
+          var clipContent = buildDownloadContent(_proData, false);
+          var selectedImages = (_proData.assets || []).filter(function (a) {
+            return a.selected && a.type === 'image' && a.dataUrl;
           });
+
+          await writeClipboard(clipContent);
+
+          // Store text for auto-paste
+          storagePayload = { portility_pending_paste: clipContent };
+
+          // Store image data for content script to paste as attachments
+          if (selectedImages.length > 0) {
+            storagePayload.portility_pending_images = selectedImages.map(function (a) {
+              return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg' };
+            });
+          }
+          console.log('[Pro] Storing for auto-paste:', {
+            textLength: clipContent.length,
+            imageCount: selectedImages.length,
+            imagesHaveDataUrl: selectedImages.map(function (a) { return !!a.dataUrl; }),
+          });
+
+          await new Promise(function (resolve) {
+            chrome.storage.local.set(storagePayload, resolve);
+          });
+
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
-          setScreen2Status('Brief copied \u2014 paste it in the new tab!');
+          statusMsg = selectedImages.length > 0
+            ? 'Brief + ' + selectedImages.length + ' image(s) porting!'
+            : 'Brief copied \u2014 paste it in the new tab!';
+          setScreen2Status(statusMsg);
           crumb('pro_brief_ported', { dest: destination });
-          trackEvent('pro_brief_ported', { destination: destination });
+          trackEvent('pro_brief_ported', { destination: destination, imagesDownloaded: selectedImages.length });
         }
 
-        _proBriefContent = null;
         _proData = null;
       } catch (err) {
         crumb('pro_brief_failed', { error: (err.message || '').substring(0, 200) });
@@ -1978,7 +2301,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       const conversationText = response.text;
-      _extractedConversationText = conversationText;
       crumb('port_chat_extracted', { messageCount: response.messageCount });
 
       trackEvent('portility_extract_initiated', {
@@ -2051,43 +2373,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // PORT MY CHAT PRO
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // ── Pro loading text rotation ──────────────────────────────────────────
-  var _proLoadingMessages = [
-    'Generating project brief\u2026',
-    'Summarizing conversation\u2026',
-    'Compressing images\u2026',
-  ];
-  var _proLoadingIdx = 0;
-  var _proLoadingInterval = null;
-
-  function startProLoadingCycle() {
-    _proLoadingIdx = 0;
-    if (proLoadingText) proLoadingText.textContent = _proLoadingMessages[0];
-    _proLoadingInterval = setInterval(function () {
-      _proLoadingIdx = (_proLoadingIdx + 1) % _proLoadingMessages.length;
-      if (proLoadingText) proLoadingText.textContent = _proLoadingMessages[_proLoadingIdx];
-    }, 3000);
-  }
-
-  function stopProLoadingCycle() {
-    if (_proLoadingInterval) {
-      clearInterval(_proLoadingInterval);
-      _proLoadingInterval = null;
-    }
-  }
-
-  function showProReview() {
-    document.body.classList.add('pro-review-active');
-    proLoading.style.display = 'block';
-    proContent.style.display = 'none';
-    proError.textContent = '';
-    proStatus.textContent = '';
-    startProLoadingCycle();
-  }
-
   function hideProReview() {
     document.body.classList.remove('pro-review-active');
-    stopProLoadingCycle();
   }
 
   function mergeAssets(extractedAssets, sonnetAssets) {
@@ -2147,72 +2434,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return merged;
   }
 
-  function renderProReview(data) {
-    proLoading.style.display = 'none';
-    proContent.style.display = 'block';
-    stopProLoadingCycle();
-
-    // Build asset table
-    proAssetTableBody.innerHTML = '';
-
-    if (data.assets.length === 0) {
-      proAssetsSection.style.display = 'none';
-      proNoAssets.style.display = 'block';
-    } else {
-      proAssetsSection.style.display = 'block';
-      proNoAssets.style.display = 'none';
-
-      for (var i = 0; i < data.assets.length; i++) {
-        var asset = data.assets[i];
-        var tr = document.createElement('tr');
-
-        // Checkbox
-        var tdCheck = document.createElement('td');
-        var cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = asset.important !== false;
-        cb.setAttribute('data-asset-index', i);
-        cb.style.cursor = 'pointer';
-        tdCheck.appendChild(cb);
-        tr.appendChild(tdCheck);
-
-        // Description (with optional thumbnail)
-        var tdDesc = document.createElement('td');
-        if (asset.thumbnailUrl && asset.type === 'image') {
-          var thumb = document.createElement('img');
-          thumb.className = 'pro-asset-thumb';
-          thumb.src = asset.thumbnailUrl;
-          thumb.alt = '';
-          thumb.style.marginRight = '6px';
-          thumb.style.verticalAlign = 'middle';
-          tdDesc.appendChild(thumb);
-        }
-        var descSpan = document.createElement('span');
-        descSpan.textContent = asset.description || asset.filename || asset.alt || 'Unnamed asset';
-        descSpan.style.fontSize = '11px';
-        tdDesc.appendChild(descSpan);
-        tr.appendChild(tdDesc);
-
-        // Type badge
-        var tdType = document.createElement('td');
-        var typeSpan = document.createElement('span');
-        typeSpan.className = 'pro-asset-type ' + (asset.type || 'file');
-        typeSpan.textContent = asset.type || 'file';
-        tdType.appendChild(typeSpan);
-        tr.appendChild(tdType);
-
-        // Reason
-        var tdReason = document.createElement('td');
-        tdReason.className = 'pro-asset-reason';
-        tdReason.textContent = asset.reason || '';
-        tr.appendChild(tdReason);
-
-        proAssetTableBody.appendChild(tr);
-      }
-    }
-  }
-
-  function buildDownloadContent(data) {
+  function buildDownloadContent(data, embedImages) {
     var md = '# ' + data.title + '\n\n';
     md += '*Generated by Portility Pro on ' + new Date().toLocaleDateString() + '*\n';
     md += '*Source: ' + data.sourcePlatform + '*\n\n';
@@ -2220,14 +2442,33 @@ document.addEventListener('DOMContentLoaded', () => {
     md += data.brief + '\n\n';
 
     var selectedAssets = data.assets.filter(function (a) { return a.selected; });
-    if (selectedAssets.length > 0) {
+    var imageAssets = selectedAssets.filter(function (a) { return a.type === 'image'; });
+    var otherAssets = selectedAssets.filter(function (a) { return a.type !== 'image'; });
+
+    // Embed captured images (for "save" destination)
+    if (embedImages && imageAssets.length > 0) {
+      md += '---\n\n';
+      md += '## Images\n\n';
+      for (var i = 0; i < imageAssets.length; i++) {
+        var img = imageAssets[i];
+        var desc = img.description || img.alt || img.filename || 'Image ' + (i + 1);
+        var src = img.dataUrl || img.url || '';
+        if (src) {
+          md += '### ' + desc + '\n';
+          md += '![' + desc + '](' + src + ')\n\n';
+        }
+      }
+    }
+
+    // Non-image asset manifest (files, artifacts)
+    if (otherAssets.length > 0) {
       md += '---\n\n';
       md += '## Asset Manifest\n\n';
       md += '| Asset | Type | Description |\n';
       md += '|-------|------|-------------|\n';
-      for (var i = 0; i < selectedAssets.length; i++) {
-        var a = selectedAssets[i];
-        md += '| ' + (a.filename || a.description || 'Asset ' + (i + 1)) +
+      for (var j = 0; j < otherAssets.length; j++) {
+        var a = otherAssets[j];
+        md += '| ' + (a.filename || a.description || 'Asset ' + (j + 1)) +
               ' | ' + (a.type || '-') +
               ' | ' + (a.description || '-') + ' |\n';
       }
@@ -2238,12 +2479,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   proChatBtn.addEventListener('click', async function () {
     proChatBtn.disabled = true;
-    setStatus('Extracting conversation...');
+    setStatus('');
 
     try {
       // Usage gating — atomic check + increment
       var auth = await ensureAuthenticated();
-      var usageResult = await useFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro');
+      var usageResult = applyDevTierToResult(await useFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro'));
       if (!usageResult.allowed) {
         proChatBtn.disabled = false;
         setStatus('');
@@ -2265,10 +2506,42 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (/gemini\.google\.com/i.test(tab.url)) sourcePlatform = 'gemini';
       crumb('pro_start', { platform: sourcePlatform });
 
-      // Step 2: Extract conversation + assets
+      _pmcProTab = { id: tab.id, url: tab.url, sourcePlatform: sourcePlatform };
+
+      // Step 2: Show destination picker immediately with toggle + profile checkbox
+      _portMode = 'pmc_pro';
+      screen2Label.textContent = 'Port conversation to\u2026';
+      setScreen2Status('');
+      setAllDestBtnsDisabled(false);
+      instructionsCheckboxLabel.style.display = 'none';
+      portTextToggle.style.display = 'block';
+      includeProfileLabel.style.display = 'flex';
+
+      // Restore saved settings (toggle + checkbox + profile selection)
+      restorePmcSettings();
+
+      // Populate profile dropdown from cached profiles or fetch
+      if (_cachedProfiles && _cachedProfiles.length > 0) {
+        populateProfileDropdown(_cachedProfiles);
+      } else {
+        // Fetch profiles in background to populate dropdown
+        (async function () {
+          try {
+            await migrateLegacyProfile(auth.userId, auth.idToken, auth.firebaseUid);
+            var profiles = await listProfilesFromFirestore(auth.userId, auth.idToken, auth.firebaseUid);
+            _cachedProfiles = profiles;
+            populateProfileDropdown(profiles);
+          } catch (e) {
+            populateProfileDropdown([]);
+          }
+        })();
+      }
+
+      showScreen('screen2');
+
+      // Step 3: Start extraction in background while user chooses destination
       crumb('pro_extract');
-      setStatus('Extracting conversation and assets...');
-      const extractResponse = await new Promise(function (resolve, reject) {
+      _pmcProExtractPromise = new Promise(function (resolve, reject) {
         chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO' }, function (resp) {
           if (chrome.runtime.lastError) {
             reject(new Error('Could not reach the page \u2014 try refreshing.'));
@@ -2282,172 +2555,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       });
 
-      crumb('pro_extracted', { messageCount: extractResponse.messageCount, assetCount: (extractResponse.assets || []).length });
-      console.log('[Pro] Extracted assets:', (extractResponse.assets || []).length, extractResponse.assets);
-
-      // No assets detected → skip Pro review, go straight to destination screen
-      if (!extractResponse.assets || extractResponse.assets.length === 0) {
-        console.log('[Pro] No assets — skipping to destination screen');
-        crumb('pro_no_assets_skip');
-        trackEvent('pro_no_assets_skip', { platform: sourcePlatform });
-        setStatus('');
-        _portMode = 'chat';
-        screen2Label.textContent = 'Port conversation to\u2026';
-        setScreen2Status('');
-        setAllDestBtnsDisabled(false);
-        showScreen('screen2');
-        proChatBtn.disabled = false;
-        return;
-      }
-
-      // Step 3: Moderation check
-      crumb('pro_moderate');
-      setStatus('Checking content...');
-      const moderationResult = await checkModeration(extractResponse.text);
-      crumb('pro_moderated', { flagged: moderationResult.flagged });
-      if (moderationResult.flagged) {
-        trackEvent('portility_moderation_flagged', {
-          source: 'pro',
-          platform: sourcePlatform,
-        });
-        showModerationModal();
-        proChatBtn.disabled = false;
-        setStatus('');
-        return;
-      }
-
-      // Step 4: Switch to Pro review screen
-      setStatus('');
-      showProReview();
-
-      // Step 4b: Check Drive auth and start concurrent auth if needed (only if backup enabled)
-      var driveAuthPromise = null;
-      var driveBackupSettings = await new Promise(function (resolve) {
-        chrome.storage.local.get('portility_drive_backup_enabled', resolve);
-      });
-      var driveBackupEnabled = driveBackupSettings.portility_drive_backup_enabled === true;
-
-      if (driveBackupEnabled) {
-        try {
-          console.log('[Pro] Checking Drive auth...');
-          var driveCheck = await new Promise(function (resolve) {
-            chrome.runtime.sendMessage({ type: 'CHECK_DRIVE_AUTH' }, function (resp) {
-              console.log('[Pro] CHECK_DRIVE_AUTH response:', resp);
-              resolve(resp || { authenticated: false });
-            });
-          });
-          if (!driveCheck.authenticated) {
-            console.log('[Pro] Drive not authenticated, starting auth flow...');
-            crumb('pro_drive_auth_start');
-            driveAuthPromise = new Promise(function (resolve) {
-              chrome.runtime.sendMessage({ type: 'START_GDRIVE_AUTH' }, function (resp) {
-                console.log('[Pro] START_GDRIVE_AUTH response:', resp);
-                resolve(resp || { authenticated: false });
-              });
-            });
-          } else {
-            console.log('[Pro] Drive already authenticated');
-          }
-        } catch (e) {
-          // Drive check failed — continue without Drive
-          console.log('[Pro] Drive check error:', e.message);
-          crumb('pro_drive_check_error', { error: (e.message || '').substring(0, 100) });
-        }
-      } else {
-        console.log('[Pro] Drive backup disabled, skipping auth');
-      }
-
-      // Step 5: Call worker /summarize-pro (runs concurrently with Drive auth)
-      crumb('pro_summarize');
-      const proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
-      if (!proxyBase) throw new Error('Proxy URL not configured.');
-
-      var phDistinctId = await getDistinctId();
-      var summaryPromise = fetch(proxyBase + '/summarize-pro', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': phDistinctId },
-        body: JSON.stringify({
-          conversation: extractResponse.text,
-          assets: extractResponse.assets || [],
-        }),
-      });
-
-      // Wait for summary and Drive auth concurrently
-      var results = await Promise.allSettled(
-        driveAuthPromise ? [summaryPromise, driveAuthPromise] : [summaryPromise]
-      );
-
-      // Handle Drive auth result
-      if (driveAuthPromise && results[1]) {
-        var driveResult = results[1].status === 'fulfilled' ? results[1].value : null;
-        if (driveResult && driveResult.authenticated) {
-          crumb('pro_drive_auth_success');
-        } else {
-          crumb('pro_drive_auth_failed', {
-            error: (driveResult && driveResult.error || '').substring(0, 100),
-          });
-        }
-      }
-
-      // Handle summary result
-      if (results[0].status === 'rejected') {
-        throw results[0].reason || new Error('AI analysis failed');
-      }
-      const proResponse = results[0].value;
-
-      if (!proResponse.ok) {
-        throw new Error('AI analysis failed (HTTP ' + proResponse.status + ')');
-      }
-
-      const proResponseData = await proResponse.json();
-      trackTokenUsage('summarize-pro', proResponseData._usage);
-
-      // Step 6: Parse Sonnet's response
-      crumb('pro_summarized', { hasContent: !!(proResponseData.content && proResponseData.content.length) });
-      var contentText = '';
-      if (proResponseData.content && proResponseData.content.length > 0) {
-        contentText = proResponseData.content[0].text || '';
-      }
-
-      var parsed;
-      try {
-        var jsonStr = contentText;
-        var codeBlockMatch = contentText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-        if (codeBlockMatch) jsonStr = codeBlockMatch[1];
-        parsed = JSON.parse(jsonStr);
-      } catch (e) {
-        parsed = {
-          title: 'Project Brief',
-          brief: contentText,
-          assets: [],
-        };
-      }
-
-      crumb('pro_parsed', { hasTitle: !!parsed.title, assetCount: (parsed.assets || []).length });
-      var mergedAssets = mergeAssets(extractResponse.assets || [], parsed.assets || []);
-
-      _proData = {
-        title: parsed.title || 'Project Brief',
-        brief: parsed.brief || contentText,
-        assets: mergedAssets,
-        rawConversation: extractResponse.text,
-        sourcePlatform: sourcePlatform,
-        sourceUrl: tab.url,
-      };
-
-      // Step 7: Render review
-      renderProReview(_proData);
-      crumb('pro_rendered');
-
-      trackEvent('pro_brief_generated', {
-        sourcePlatform: sourcePlatform,
-        messageCount: extractResponse.messageCount,
-        assetCount: mergedAssets.length,
-      });
-
     } catch (err) {
       crumb('pro_failed', { error: (err.message || '').substring(0, 200) });
-      hideProReview();
       setStatus(err.message || 'Something went wrong.', true);
     } finally {
       proChatBtn.disabled = false;
@@ -2501,15 +2610,17 @@ document.addEventListener('DOMContentLoaded', () => {
         sourcePlatform: _proData.sourcePlatform,
         assetsTotal: _proData.assets.length,
         assetsSelected: _proData.assets.filter(function (a) { return a.selected; }).length,
+        imagesCaptured: _proData.assets.filter(function (a) { return a.type === 'image' && a.dataUrl; }).length,
       });
 
-      // Build the content to port and show destination picker
-      _proBriefContent = buildDownloadContent(_proData);
+      // Show destination picker (content is built per-destination in handleDestination)
       _portMode = 'pro_brief';
       screen2Label.textContent = 'Port project brief to\u2026';
       setScreen2Status('');
       setAllDestBtnsDisabled(false);
       instructionsCheckboxLabel.style.display = 'none';
+      portTextToggle.style.display = 'none';
+      includeProfileLabel.style.display = 'none';
       hideProReview();
       showScreen('screen2');
 
@@ -2599,7 +2710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     var soAuth;
     try {
       soAuth = await ensureAuthenticated();
-      var soUsageResult = await useFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion');
+      var soUsageResult = applyDevTierToResult(await useFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion'));
       if (!soUsageResult.allowed) {
         showUsageBlocked(soUsageResult, 'second_opinion');
         return;
@@ -2762,7 +2873,6 @@ document.addEventListener('DOMContentLoaded', () => {
   var soNewBtn = document.getElementById('soNewBtn');
   var _soCurrentScore = 0;
   var _soAnimFrame;
-  var _soFullText = '';
   var _soResultData = null;
   var SO_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -2782,10 +2892,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   });
-
-  function soZoneId(score) {
-    return score < 34 ? 'conflict' : score < 67 ? 'mixed' : 'agrees';
-  }
 
   function soZoneColors(score) {
     if (score < 34) return { text: '#fa000c', needle: '#fa000c' };
@@ -2826,6 +2932,11 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   function soSplitTitleBody(text) {
     if (!text) return { title: 'Point', summary: '' };
+    // Handle object format {title, text} from updated API
+    if (typeof text === 'object' && text.title) {
+      return { title: text.title, summary: text.text || '' };
+    }
+    if (typeof text !== 'string') return { title: 'Point', summary: String(text) };
     // Strip common AI-analysis preambles to get to the substance
     var body = text;
     var preambles = [
@@ -2889,83 +3000,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return html;
   }
 
-  /**
-   * Find the most relevant sentence from a text block matching topic keywords.
-   * Returns a plain string (for use in the comparison table).
-   */
-  function soFindRelevantQuote(text, topic) {
-    if (!text || !topic) return '';
-    var keywords = topic.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3; });
-    if (keywords.length === 0) return '';
-    var sentences = text.split(/[.!?\n]+/).filter(function (s) { return s.trim().length > 15; });
-    var best = '';
-    var bestScore = 0;
-    for (var i = 0; i < sentences.length; i++) {
-      var lower = sentences[i].toLowerCase();
-      var score = 0;
-      for (var k = 0; k < keywords.length; k++) {
-        if (lower.indexOf(keywords[k]) !== -1) score++;
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        best = sentences[i].trim();
-      }
-    }
-    if (!best) return '';
-    // Strip markdown formatting
-    best = best.replace(/\*\*/g, '').replace(/^#+\s*/, '').replace(/^[-*]\s+/, '');
-    if (best.length > 180) best = best.substring(0, 177) + '...';
-    return best;
-  }
-
   function escHtml(str) {
     var d = document.createElement('div');
     d.textContent = str || '';
     return d.innerHTML;
-  }
-
-  /**
-   * Convert markdown text to formatted HTML for display.
-   */
-  function fmtMarkdown(str) {
-    var s = str || '';
-    // Escape HTML
-    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // Code blocks (triple backtick)
-    s = s.replace(/```([\s\S]*?)```/g, function (_, c) { return '<pre>' + c.trim() + '</pre>'; });
-    // Inline code
-    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // Bold
-    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // H2 headers
-    s = s.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-    // H3 headers
-    s = s.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-    // H4 headers
-    s = s.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
-    // Bullet lists (- or *)
-    s = s.replace(/^(\s*)[\-\*]\s+(.+)$/gm, '<li>$2</li>');
-    s = s.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-    // Numbered lists
-    s = s.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
-    // Blockquotes
-    s = s.replace(/^>\s?(.+)$/gm, '<blockquote>$1</blockquote>');
-    // Paragraphs: split on double newlines
-    s = s.replace(/\n{2,}/g, '</p><p>');
-    // Single newlines → <br>
-    s = s.replace(/\n/g, '<br>');
-    s = '<p>' + s + '</p>';
-    // Clean up empty/nested paragraphs around block elements
-    s = s.replace(/<p><\/p>/g, '');
-    s = s.replace(/<p>(<h[234]>)/g, '$1');
-    s = s.replace(/(<\/h[234]>)<\/p>/g, '$1');
-    s = s.replace(/<p>(<ul>)/g, '$1');
-    s = s.replace(/(<\/ul>)<\/p>/g, '$1');
-    s = s.replace(/<p>(<pre>)/g, '$1');
-    s = s.replace(/(<\/pre>)<\/p>/g, '$1');
-    s = s.replace(/<p>(<blockquote>)/g, '$1');
-    s = s.replace(/(<\/blockquote>)<\/p>/g, '$1');
-    return s;
   }
 
   function showSecondOpinionResults(data) {
@@ -2973,7 +3011,6 @@ document.addEventListener('DOMContentLoaded', () => {
     var cmp = data.comparison;
     var score = Math.round(cmp.agreement_score || 0);
     var c = soZoneColors(score);
-    var zone = soZoneId(score);
     var questionType = cmp.question_type || 'analytical';
     var tc = soTypeColors(questionType);
 
@@ -3038,9 +3075,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Model name for footer
     var modelMap = { chatgpt: 'GPT-4o', claude: 'Claude Sonnet 4.6' };
     soModelName.textContent = 'Comparison model: ' + (modelMap[data.source] || data.source);
-
-    // Store full text for "View full comparison"
-    _soFullText = data.secondOpinion || '';
 
     // Store full result data for rating page
     _soResultData = {
@@ -3241,177 +3275,6 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('comparison.html') });
   });
 
-  // ── Rating page ─────────────────────────────────────────────────────────────
-  function buildRatingPageHtml(resultData, authData) {
-    var score = Math.round((resultData.comparison && resultData.comparison.agreement_score) || 0);
-    var zone = score < 34 ? 'Conflict' : score < 67 ? 'Mixed' : 'Agrees';
-    var zoneColor = score < 34 ? '#A93226' : score < 67 ? '#B7950B' : '#1E8449';
-
-    var escaped = JSON.stringify({
-      originalBrief: resultData.originalBrief,
-      secondOpinion: resultData.secondOpinion,
-      source: resultData.source,
-      platform: resultData.platform,
-      comparison: resultData.comparison,
-      idToken: authData.idToken,
-      firebaseUid: authData.firebaseUid,
-    });
-
-    return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
-      '<title>Rate This Comparison — Portility</title>' +
-      '<style>' +
-        '*{box-sizing:border-box;margin:0;padding:0}' +
-        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#f9fafb;color:#111;padding:0}' +
-        '.header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px;display:flex;align-items:center;justify-content:space-between}' +
-        '.header h1{font-size:20px;font-weight:700;color:#111}' +
-        '.score-badge{display:inline-block;font-size:14px;font-weight:600;padding:6px 16px;border-radius:20px;background:' + (score < 34 ? '#fef2f2' : score < 67 ? '#fffbeb' : '#f0fdf4') + ';color:' + zoneColor + ';border:1px solid ' + (score < 34 ? '#fecaca' : score < 67 ? '#fde68a' : '#bbf7d0') + '}' +
-        '.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:24px 32px;max-width:1200px;margin:0 auto}' +
-        '.column{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;max-height:400px;overflow-y:auto}' +
-        '.column h2{font-size:14px;font-weight:700;color:#374151;margin-bottom:12px;position:sticky;top:0;background:#fff;padding-bottom:8px;border-bottom:1px solid #f3f4f6}' +
-        '.col-body{font-size:13px;color:#4b5563;line-height:1.7}' +
-        '.col-body p{margin-bottom:10px}' +
-        '.col-body ul,.col-body ol{margin:0 0 10px 20px}' +
-        '.col-body li{margin-bottom:4px}' +
-        '.col-body h3{font-size:13px;font-weight:700;color:#374151;margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.03em}' +
-        '.col-body strong{color:#374151}' +
-        '.col-body code{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;font-family:monospace}' +
-        '.col-body pre{background:#f3f4f6;padding:10px 12px;border-radius:6px;font-size:12px;font-family:monospace;overflow-x:auto;margin-bottom:10px;white-space:pre-wrap;word-wrap:break-word}' +
-        '.col-body blockquote{border-left:3px solid #d1d5db;padding-left:12px;margin:0 0 10px;color:#6b7280;font-style:italic}' +
-        '.rating-section{max-width:1200px;margin:0 auto;padding:0 32px 40px}' +
-        '.rating-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px}' +
-        '.rating-card h3{font-size:15px;font-weight:600;color:#111;margin-bottom:16px}' +
-        '.rating-buttons{display:flex;gap:12px;margin-bottom:20px}' +
-        '.rating-btn{padding:10px 28px;border-radius:8px;border:2px solid #e5e7eb;background:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}' +
-        '.rating-btn:hover{border-color:#14b8a6;color:#0d9488}' +
-        '.rating-btn.selected{background:#f0fdfa;border-color:#14b8a6;color:#0d9488}' +
-        '.rating-btn.selected-high{background:#f0fdf4;border-color:#22c55e;color:#15803d}' +
-        '.rating-btn.selected-medium{background:#fffbeb;border-color:#f59e0b;color:#92400e}' +
-        '.rating-btn.selected-low{background:#fef2f2;border-color:#ef4444;color:#dc2626}' +
-        'textarea{width:100%;height:80px;border:1px solid #d1d5db;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;color:#111;transition:border-color 0.2s}' +
-        'textarea:focus{outline:none;border-color:#14b8a6;box-shadow:0 0 0 3px rgba(20,184,166,0.1)}' +
-        'textarea::placeholder{color:#9ca3af}' +
-        '.submit-btn{margin-top:16px;padding:10px 32px;background:linear-gradient(135deg,#14b8a6,#4ade80);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:box-shadow 0.2s,transform 0.15s}' +
-        '.submit-btn:hover:not(:disabled){box-shadow:0 4px 12px rgba(20,184,166,0.3);transform:translateY(-1px)}' +
-        '.submit-btn:disabled{opacity:0.5;cursor:not-allowed}' +
-        '.success-msg{display:none;margin-top:12px;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#15803d;font-size:13px;font-weight:600}' +
-        '.error-msg{display:none;margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#dc2626;font-size:13px}' +
-      '</style></head><body>' +
-      '<div class="header"><h1>Rate This Comparison</h1>' +
-      '<span class="score-badge">AI Score: ' + score + '% — ' + zone + '</span></div>' +
-      '<div class="columns">' +
-        '<div class="column"><h2>Original Brief</h2><div id="origText" class="col-body"></div></div>' +
-        '<div class="column"><h2>Second Opinion</h2><div id="soText" class="col-body"></div></div>' +
-      '</div>' +
-      '<div class="rating-section"><div class="rating-card">' +
-        '<h3>How would you rate the agreement between these?</h3>' +
-        '<div class="rating-buttons">' +
-          '<button class="rating-btn" data-rating="high">High</button>' +
-          '<button class="rating-btn" data-rating="medium">Medium</button>' +
-          '<button class="rating-btn" data-rating="low">Low</button>' +
-        '</div>' +
-        '<label style="font-size:13px;color:#374151;display:block;margin-bottom:6px">Why? (optional)</label>' +
-        '<textarea id="reasonInput" placeholder="Explain your reasoning..."></textarea>' +
-        '<button class="submit-btn" id="submitBtn" disabled>Submit Feedback</button>' +
-        '<div class="success-msg" id="successMsg">Thank you! Your feedback has been saved.</div>' +
-        '<div class="error-msg" id="errorMsg"></div>' +
-      '</div></div>' +
-      '<script id="soData" type="application/json">' + escaped + '<\/script>' +
-      '<script>' +
-        '(function(){' +
-          'var d=JSON.parse(document.getElementById("soData").textContent);' +
-          'function fmtText(str){' +
-            'var s=str||"";' +
-            // Escape HTML
-            's=s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");' +
-            // Code blocks (triple backtick)
-            's=s.replace(/```([\\s\\S]*?)```/g,function(_,c){return"<pre>"+c.trim()+"</pre>"});' +
-            // Inline code
-            's=s.replace(/`([^`]+)`/g,"<code>$1</code>");' +
-            // Bold
-            's=s.replace(/\\*\\*(.+?)\\*\\*/g,"<strong>$1</strong>");' +
-            // Headers (### or ##)
-            's=s.replace(/^###?\\s+(.+)$/gm,"<h3>$1</h3>");' +
-            // Bullet lists (- or *)
-            's=s.replace(/^(\\s*)[\\-\\*]\\s+(.+)$/gm,"<li>$2</li>");' +
-            's=s.replace(/(<li>.*<\\/li>\\n?)+/g,"<ul>$&</ul>");' +
-            // Numbered lists
-            's=s.replace(/^\\d+\\.\\s+(.+)$/gm,"<li>$1</li>");' +
-            // Blockquotes
-            's=s.replace(/^>\\s?(.+)$/gm,"<blockquote>$1</blockquote>");' +
-            // Paragraphs: split on double newlines
-            's=s.replace(/\\n{2,}/g,"</p><p>");' +
-            // Single newlines within a paragraph → <br>
-            's=s.replace(/\\n/g,"<br>");' +
-            's="<p>"+s+"</p>";' +
-            // Clean up empty paragraphs
-            's=s.replace(/<p><\\/p>/g,"");' +
-            's=s.replace(/<p>(<h3>)/g,"$1");' +
-            's=s.replace(/(<\\/h3>)<\\/p>/g,"$1");' +
-            's=s.replace(/<p>(<ul>)/g,"$1");' +
-            's=s.replace(/(<\\/ul>)<\\/p>/g,"$1");' +
-            's=s.replace(/<p>(<pre>)/g,"$1");' +
-            's=s.replace(/(<\\/pre>)<\\/p>/g,"$1");' +
-            's=s.replace(/<p>(<blockquote>)/g,"$1");' +
-            's=s.replace(/(<\\/blockquote>)<\\/p>/g,"$1");' +
-            'return s;' +
-          '}' +
-          'document.getElementById("origText").innerHTML=fmtText(d.originalBrief);' +
-          'document.getElementById("soText").innerHTML=fmtText(d.secondOpinion);' +
-          'var selected=null;' +
-          'var colorMap={high:"selected-high",medium:"selected-medium",low:"selected-low"};' +
-          'document.querySelectorAll(".rating-btn").forEach(function(btn){' +
-            'btn.addEventListener("click",function(){' +
-              'document.querySelectorAll(".rating-btn").forEach(function(b){b.className="rating-btn"});' +
-              'selected=btn.dataset.rating;' +
-              'btn.className="rating-btn "+colorMap[selected];' +
-              'document.getElementById("submitBtn").disabled=false;' +
-            '});' +
-          '});' +
-          'document.getElementById("submitBtn").addEventListener("click",function(){' +
-            'var btn=this;btn.disabled=true;btn.textContent="Saving...";' +
-            'var reason=document.getElementById("reasonInput").value.trim();' +
-            'var cmp=d.comparison||{};' +
-            'var score=Math.round(cmp.agreement_score||0);' +
-            'var docId=Date.now()+"-"+Math.random().toString(36).slice(2,8);' +
-            'var url="https://firestore.googleapis.com/v1/projects/portility/databases/(default)/documents/second_opinion_feedback/"+docId;' +
-            'var fields={' +
-              'firebaseUid:{stringValue:d.firebaseUid},' +
-              'platform:{stringValue:d.platform},' +
-              'comparisonModel:{stringValue:d.source},' +
-              'aiScore:{integerValue:String(score)},' +
-              'humanRating:{stringValue:selected},' +
-              'humanReason:{stringValue:reason},' +
-              'originalBrief:{stringValue:d.originalBrief},' +
-              'secondOpinion:{stringValue:d.secondOpinion},' +
-              'questionType:{stringValue:cmp.question_type||"analytical"},' +
-              'createdAt:{timestampValue:new Date().toISOString()}' +
-            '};' +
-            'fetch(url,{method:"PATCH",headers:{"Authorization":"Bearer "+d.idToken,"Content-Type":"application/json"},body:JSON.stringify({fields:fields})})' +
-            '.then(function(r){' +
-              'if(!r.ok)throw new Error("HTTP "+r.status);' +
-              'document.getElementById("successMsg").style.display="block";' +
-              'document.getElementById("errorMsg").style.display="none";' +
-              'btn.textContent="Submitted";' +
-              'document.querySelectorAll(".rating-btn").forEach(function(b){b.style.pointerEvents="none"});' +
-              // PostHog tracking
-              'fetch("' + POSTHOG_HOST + '/capture/",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({' +
-                'api_key:"' + POSTHOG_API_KEY + '",' +
-                'event:"second_opinion_feedback_submitted",' +
-                'distinct_id:d.firebaseUid,' +
-                'properties:{aiScore:score,humanRating:selected,hasReason:reason.length>0,platform:d.platform,$lib:"portility-extension"},' +
-                'timestamp:new Date().toISOString()' +
-              '}),keepalive:true}).catch(function(){});' +
-            '})' +
-            '.catch(function(e){' +
-              'document.getElementById("errorMsg").textContent="Failed to save: "+e.message;' +
-              'document.getElementById("errorMsg").style.display="block";' +
-              'btn.disabled=false;btn.textContent="Submit Feedback";' +
-            '});' +
-          '});' +
-        '})();<\/script>' +
-      '</body></html>';
-  }
-
   // ── Inline Likert rating ────────────────────────────────────────────────────
   document.querySelectorAll('.so-likert-btn').forEach(function (btn) {
     btn.addEventListener('click', async function () {
@@ -3535,6 +3398,8 @@ document.addEventListener('DOMContentLoaded', () => {
       setScreen2Status('');
       setAllDestBtnsDisabled(false);
       instructionsCheckboxLabel.style.display = 'none';
+      portTextToggle.style.display = 'none';
+      includeProfileLabel.style.display = 'none';
       showScreen('screen2');
     } catch (err) {
       crumb('instr_free_failed', { error: (err.message || '').substring(0, 200) });

@@ -22,11 +22,11 @@
   'use strict';
 
   // ─── Shared utilities (from content-shared.js) ────────────────────────────
-  const { isElementVisible, extractElementText, stripMarkdown, copyToClipboard, formatConversation } =
+  const { isElementVisible, extractElementText, copyToClipboard, formatConversation } =
     window.PortilityShared;
 
-  // ─── Selectors ────────────────────────────────────────────────────────────
-  const HUMAN_SELECTORS = [
+  // ─── Selectors (overridable via remote config) ───────────────────────────
+  let HUMAN_SELECTORS = [
     '[data-testid="user-message"]',
     '[data-testid="human-turn"]',
     '[class*="human-turn"]',
@@ -35,7 +35,16 @@
 
   // The class used on Claude's AI response containers.
   // We filter querySelectorAll results to outermost matches only (BUG-005).
-  const AI_CLASS_FRAGMENT = 'font-claude-response';
+  let AI_CLASS_FRAGMENT = 'font-claude-response';
+
+  // Override selectors from remote config cache (non-blocking)
+  if (window.PortilityConfig && window.PortilityConfig.getRemoteSelectors) {
+    window.PortilityConfig.getRemoteSelectors('claude').then(function (sel) {
+      if (!sel) return;
+      if (sel.humanSelectors && sel.humanSelectors.length) HUMAN_SELECTORS = sel.humanSelectors;
+      if (sel.aiClassFragment) AI_CLASS_FRAGMENT = sel.aiClassFragment;
+    });
+  }
 
   // ─── Conversation scope (BUG-004, BUG-001) ────────────────────────────────
   /**
@@ -341,6 +350,8 @@
             }
           }
 
+          await window.PortilityShared.captureImageData(allAssets);
+
           var formatted = formatConversation(messages);
           sendResponse({
             success: true,
@@ -436,30 +447,57 @@
           }
           chrome.storage.local.remove('portility_pending_paste');
 
-          // Auto-submit: poll briefly for send button to become enabled
-          var submitAttempts = 0;
-          var submitInterval = setInterval(function () {
-            var sendBtn = document.querySelector('button[aria-label="Send Message"]')
-              || document.querySelector('button[aria-label="Send message"]')
-              || document.querySelector('fieldset button[type="button"]:last-child')
-              || document.querySelector('button[data-testid="send-button"]');
-            if (sendBtn && !sendBtn.disabled) {
-              clearInterval(submitInterval);
-              sendBtn.click();
-              if (typeof window.dreweryTrack === 'function') {
-                window.dreweryTrack('portility_auto_submit', { platform: 'claude', success: true });
+          // Paste pending images, then auto-submit
+          chrome.storage.local.get('portility_pending_images', function (imgData) {
+            var images = imgData.portility_pending_images;
+            var hasImages = images && images.length > 0;
+
+            if (hasImages && window.PortilityShared && window.PortilityShared.pasteImages) {
+              // Try clicking attach button to ensure file input is in DOM
+              var attachBtn = document.querySelector('button[aria-label="Attach files"]')
+                || document.querySelector('button[data-testid="file-upload"]')
+                || document.querySelector('[aria-label="Upload content"]');
+              if (attachBtn) {
+                attachBtn.click();
+                // Close any file dialog that opened by pressing Escape
+                setTimeout(function () { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); }, 100);
               }
-            } else if (++submitAttempts > 20) {
-              clearInterval(submitInterval);
-              if (typeof window.dreweryTrack === 'function') {
-                window.dreweryTrack('portility_auto_submit', {
-                  platform: 'claude',
-                  success: false,
-                  reason: sendBtn ? 'button_disabled' : 'button_not_found',
+
+              setTimeout(function () {
+                window.PortilityShared.pasteImages(input, images, function () {
+                  chrome.storage.local.remove('portility_pending_images');
                 });
-              }
+              }, 300);
             }
-          }, 100);
+
+            // Auto-submit: poll for send button (longer delay when images attached)
+            var submitDelay = hasImages ? 2000 : 0;
+            setTimeout(function () {
+              var submitAttempts = 0;
+              var submitInterval = setInterval(function () {
+                var sendBtn = document.querySelector('button[aria-label="Send Message"]')
+                  || document.querySelector('button[aria-label="Send message"]')
+                  || document.querySelector('fieldset button[type="button"]:last-child')
+                  || document.querySelector('button[data-testid="send-button"]');
+                if (sendBtn && !sendBtn.disabled) {
+                  clearInterval(submitInterval);
+                  sendBtn.click();
+                  if (typeof window.dreweryTrack === 'function') {
+                    window.dreweryTrack('portility_auto_submit', { platform: 'claude', success: true });
+                  }
+                } else if (++submitAttempts > 20) {
+                  clearInterval(submitInterval);
+                  if (typeof window.dreweryTrack === 'function') {
+                    window.dreweryTrack('portility_auto_submit', {
+                      platform: 'claude',
+                      success: false,
+                      reason: sendBtn ? 'button_disabled' : 'button_not_found',
+                    });
+                  }
+                }
+              }, 100);
+            }, submitDelay);
+          });
         }
         if (++attempts > 40) {
           clearInterval(interval);

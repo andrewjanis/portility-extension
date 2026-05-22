@@ -12,21 +12,38 @@ document.addEventListener('DOMContentLoaded', function () {
   var accountSignedOut = document.getElementById('accountSignedOut');
   var accountEmail = document.getElementById('accountEmail');
 
-  // ─── DEV: Tier toggle ───────────────────────────────────────────────────
-  var devTierToggle = document.getElementById('devTierToggle');
-  var devTierLabel = document.getElementById('devTierLabel');
+  // ─── DEV: Tier radio buttons ────────────────────────────────────────────
+  // Uses a separate storage key (devTierOverride) so it can never be
+  // clobbered by the normal tier-refresh flow that writes to userTier.
+  var devTierContainer = document.getElementById('devTierRadios');
+  var devTierStatus = document.createElement('div');
+  devTierStatus.style.cssText = 'font-size:11px;color:#f97316;margin-top:4px;';
+  devTierContainer.parentNode.insertBefore(devTierStatus, devTierContainer.nextSibling);
 
-  chrome.storage.local.get('userTier', function (result) {
-    var tier = (result.userTier && result.userTier.tier) || 'free';
-    devTierToggle.checked = tier === 'paid';
-    devTierLabel.textContent = 'Current: ' + tier;
+  chrome.storage.local.get('devTierOverride', function (result) {
+    var tier = result.devTierOverride || null;
+    if (tier) {
+      var match = devTierContainer.querySelector('input[value="' + tier + '"]');
+      if (match) match.checked = true;
+      devTierStatus.textContent = 'Active override: ' + tier;
+    } else {
+      // No override — show actual tier from userTier
+      chrome.storage.local.get('userTier', function (r) {
+        var actual = (r.userTier && r.userTier.tier) || 'free';
+        var match = devTierContainer.querySelector('input[value="' + actual + '"]');
+        if (match) match.checked = true;
+        devTierStatus.textContent = 'No override (actual: ' + actual + ')';
+      });
+    }
   });
 
-  devTierToggle.addEventListener('change', function () {
-    var newTier = devTierToggle.checked ? 'paid' : 'free';
-    chrome.storage.local.set({ userTier: { tier: newTier, timestamp: Date.now(), devOverride: true } }, function () {
-      devTierLabel.textContent = 'Current: ' + newTier;
-      // Reload the page so tier gating re-applies
+  devTierContainer.addEventListener('change', function (e) {
+    if (e.target.name !== 'devTier') return;
+    var newTier = e.target.value;
+    console.log('[Options] Dev tier override set to:', newTier);
+    // Write to separate key so it cannot be overwritten by tier refresh
+    chrome.storage.local.set({ devTierOverride: newTier }, function () {
+      console.log('[Options] Dev tier override saved, reloading');
       location.reload();
     });
   });
@@ -35,8 +52,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var backupSection = document.getElementById('backupSection');
   var imageQualitySection = document.getElementById('imageQualitySection');
 
-  chrome.storage.local.get('userTier', function (result) {
-    var tier = (result.userTier && result.userTier.tier) || 'free';
+  chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
+    var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
     if (tier === 'free') {
       [backupSection, imageQualitySection].forEach(function (section) {
         if (!section) return;
@@ -54,9 +71,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ─── Load saved settings ──────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['portility_drive_backup_enabled', 'portility_compress_images', 'userTier'],
+    ['portility_drive_backup_enabled', 'portility_compress_images', 'devTierOverride', 'userTier'],
     function (result) {
-      var tier = (result.userTier && result.userTier.tier) || 'free';
+      var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
       if (tier !== 'free') {
         driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
         compressToggle.checked = result.portility_compress_images !== false;
@@ -177,6 +194,11 @@ document.addEventListener('DOMContentLoaded', function () {
         console.log('[Options] All cached tokens cleared');
         driveBackupToggle.checked = false;
         chrome.storage.local.set({ portility_drive_backup_enabled: false });
+        chrome.storage.local.remove([
+          'google_login_hint', 'firebase_id_token', 'firebase_uid',
+          'firebase_token_expiry', 'google_access_token', 'google_user_id',
+          'devTierOverride',
+        ]);
         hideDriveStatus();
         showSignedOut();
       });
@@ -262,12 +284,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  function escOptHtml(str) {
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
   // ─── Usage ────────────────────────────────────────────────────────────────
   var usageSection = document.getElementById('usageSection');
   var usageSummary = document.getElementById('usageSummary');
@@ -275,9 +291,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function loadUsageInfo() {
     ensureAuthenticated().then(function (auth) {
-      // Get tier
-      return getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
-        return { auth: auth, tier: tier };
+      // Check for dev tier override (separate storage key) before hitting Firestore
+      return new Promise(function (resolve) {
+        chrome.storage.local.get('devTierOverride', function (result) {
+          if (result.devTierOverride) {
+            console.log('[Options] Using dev tier override:', result.devTierOverride);
+            resolve({ auth: auth, tier: result.devTierOverride });
+          } else {
+            getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
+              resolve({ auth: auth, tier: tier });
+            });
+          }
+        });
       });
     }).then(function (ctx) {
       var auth = ctx.auth;
@@ -302,11 +327,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Summary line
     var tierLabel = summary.tierLabel || summary.tier;
-    var summaryText = 'You are on ' + tierLabel + ' \u2014 ' + summary.used + ' of ' + summary.limit + ' uses';
-    if (summary.isLifetime) {
-      summaryText += ' (lifetime)';
+    var summaryText;
+    if (summary.limit === Infinity || summary.limit === null) {
+      summaryText = 'You are on ' + tierLabel + ' \u2014 ' + summary.used + ' uses (unlimited)';
     } else {
-      summaryText += ' this month';
+      summaryText = 'You are on ' + tierLabel + ' \u2014 ' + summary.used + ' of ' + summary.limit + ' uses';
+      if (summary.isLifetime) {
+        summaryText += ' (lifetime)';
+      } else {
+        summaryText += ' this month';
+      }
     }
     usageSummary.textContent = summaryText;
 
