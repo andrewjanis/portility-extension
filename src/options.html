@@ -8,25 +8,6 @@
 <body>
   <h1>Settings</h1>
 
-  <!-- Backup -->
-  <div class="section" id="backupSection">
-    <div class="section-title">Backup</div>
-    <div class="toggle-row">
-      <span class="toggle-label">Back up assets to Google Drive</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="driveBackupToggle">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="section-description">When enabled, copies of your images and files are saved to a Google Drive folder as backup. (You must be signed in to your Google account)</div>
-    <div id="driveStatus" class="drive-status">
-      <span class="status-dot"></span>
-      <span>Connected</span>
-      <a id="driveFilesLink" href="#" class="drive-files-link">see your files</a>
-      <button id="driveDisconnectBtn" class="disconnect-link">Disconnect</button>
-    </div>
-  </div>
-
   <!-- Image Quality -->
   <div class="section" id="imageQualitySection">
     <div class="section-title">Image Quality</div>
@@ -44,11 +25,11 @@
     </div>
   </div>
 
-  <!-- Port Me -->
+  <!-- Port My Profile -->
   <div class="section">
-    <div class="section-title">Port Me</div>
+    <div class="section-title">Port My Profile</div>
     <div class="section-description">Manage your AI operating instructions and profiles.</div>
-    <button id="managePortMeBtn" class="btn-primary-sm">Manage Port Me</button>
+    <button id="managePortMeBtn" class="btn-primary-sm">Manage Port My Profile</button>
   </div>
 
   <!-- Second Opinion History -->
@@ -74,17 +55,43 @@
     <div id="usageHistory"></div>
   </div>
 
-  <!-- DEV: Tier Toggle -->
-  <div class="section" id="devTierSection" style="border:2px dashed #f97316;">
-    <div class="section-title" style="color:#f97316;">DEV: Tier Override</div>
+  <!-- Backup -->
+  <div class="section locked" id="backupSection">
+    <div class="section-title">Backup (coming soon)</div>
     <div class="toggle-row">
-      <span class="toggle-label" id="devTierLabel">Current: free</span>
+      <span class="toggle-label">Back up assets to Google Drive</span>
       <label class="toggle-switch">
-        <input type="checkbox" id="devTierToggle">
+        <input type="checkbox" id="driveBackupToggle">
         <span class="toggle-slider"></span>
       </label>
     </div>
-    <div class="section-description">Toggle between free and paid for testing. Reopen the popup after switching.</div>
+    <div class="section-description">When enabled, copies of your images and files are saved to a Google Drive folder as backup. (You must be signed in to your Google account)</div>
+    <div id="driveStatus" class="drive-status">
+      <span class="status-dot"></span>
+      <span>Connected</span>
+      <a id="driveFilesLink" href="#" class="drive-files-link">see your files</a>
+      <button id="driveDisconnectBtn" class="disconnect-link">Disconnect</button>
+    </div>
+  </div>
+
+  <!-- DEV: Tier Toggle -->
+  <div class="section" id="devTierSection" style="border:2px dashed #f97316;">
+    <div class="section-title" style="color:#f97316;">DEV: Tier Override</div>
+    <div id="devTierRadios" style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="free" checked> Free
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid"> Pro
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid2"> Premium
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid3"> Unlimited
+      </label>
+    </div>
+    <div class="section-description">Select a tier for testing. Reopen the popup after switching.</div>
   </div>
 
   <!-- Google Account -->

@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var _npIcon = null;
   var _npColorIndex = 0;
   var _npDocument = null; // { name, content }
+  var _editingProfile = null;
   var _cachedAuth = null;
   var _cachedProfiles = [];
 
@@ -187,9 +188,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // PROFILES (paid only)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  chrome.storage.local.get('userTier', function (result) {
-    var tier = (result.userTier && result.userTier.tier) || 'free';
-    if (tier !== 'paid') {
+  chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
+    var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
+    if (tier === 'free') {
       profilesSection.classList.add('locked-overlay');
       profilesList.innerHTML = '<div class="locked-label">Upgrade to Pro to create multiple profiles.</div>';
       newProfileBtn.style.display = 'none';
@@ -338,9 +339,18 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         actions.appendChild(radio);
 
+        var editBtn = document.createElement('button');
+        editBtn.className = 'edit-btn';
+        editBtn.textContent = 'Edit';
+        editBtn.title = 'Edit profile';
+        editBtn.addEventListener('click', function () {
+          startEditProfile(profile);
+        });
+        actions.appendChild(editBtn);
+
         var delBtn = document.createElement('button');
         delBtn.className = 'delete-btn';
-        delBtn.innerHTML = '&times;';
+        delBtn.textContent = 'Delete';
         delBtn.title = 'Delete profile';
         delBtn.disabled = profiles.length <= 1;
         delBtn.addEventListener('click', function () {
@@ -382,17 +392,69 @@ document.addEventListener('DOMContentLoaded', function () {
 
   newProfileBtn.addEventListener('click', function () {
     if (_cachedProfiles.length >= MAX_PROFILES) return;
+    _editingProfile = null;
     _npDocument = null;
     npDocFileName.textContent = '';
     npDocRemoveBtn.style.display = 'none';
+    npSaveBtn.textContent = 'Save Profile';
     profilesSection.style.display = 'none';
     newProfileFlow.classList.add('active');
     showNpScreen('np-type');
   });
 
   function cancelNewProfile() {
+    _editingProfile = null;
+    npSaveBtn.textContent = 'Save Profile';
     newProfileFlow.classList.remove('active');
     profilesSection.style.display = '';
+  }
+
+  function startEditProfile(profile) {
+    _editingProfile = profile;
+    _npType = profile.type;
+    _npIcon = profile.icon;
+    _npColorIndex = profile.colourIndex;
+    _npAnswers = initNpAnswers(profile.type);
+    Object.assign(_npAnswers, profile.answers);
+    _npDocument = profile.document || null;
+    if (_npDocument) {
+      npDocFileName.textContent = _npDocument.name;
+      npDocRemoveBtn.style.display = '';
+    } else {
+      npDocFileName.textContent = '';
+      npDocRemoveBtn.style.display = 'none';
+    }
+    renderNpQuestionnaire(profile.type);
+    prefillAnswersIn(newProfileFlow, _npAnswers, 'np');
+    // Pre-fill textareas and ranges
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[profile.type];
+    if (config) {
+      for (var p = 0; p < config.pages.length; p++) {
+        var sections = config.pages[p].sections;
+        for (var s = 0; s < sections.length; s++) {
+          var sec = sections[s];
+          if (sec.type === 'textarea') {
+            var ta = document.getElementById('np-textarea-' + sec.key);
+            if (ta) ta.value = _npAnswers[sec.key] || '';
+          } else if (sec.type === 'range') {
+            var rangeEl = document.getElementById('np-range-' + sec.key);
+            if (rangeEl) rangeEl.value = _npAnswers[sec.key] || sec.default;
+          }
+          if (sec.type === 'multi-select') {
+            var otherArea = document.getElementById('np-other-area-' + sec.key);
+            var otherText = document.getElementById('np-other-text-' + sec.key);
+            if (otherArea && Array.isArray(_npAnswers[sec.key]) && _npAnswers[sec.key].indexOf('other') >= 0) {
+              otherArea.classList.add('visible');
+              if (otherText) otherText.value = _npAnswers[sec.key + '_customText'] || '';
+            }
+          }
+        }
+      }
+    }
+    npSaveBtn.textContent = 'Update Profile';
+    profilesSection.style.display = 'none';
+    newProfileFlow.classList.add('active');
+    showNpScreen('np-questionnaire');
   }
 
   function showNpScreen(id) {
@@ -532,8 +594,12 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Name
-    var typeName = _npType.charAt(0).toUpperCase() + _npType.slice(1);
-    npNameInput.value = typeName + ' Profile';
+    if (_editingProfile) {
+      npNameInput.value = _editingProfile.name;
+    } else {
+      var typeName = _npType.charAt(0).toUpperCase() + _npType.slice(1);
+      npNameInput.value = typeName + ' Profile';
+    }
 
     updateNpPreview();
   }
@@ -624,15 +690,15 @@ document.addEventListener('DOMContentLoaded', function () {
       var isFirst = _cachedProfiles.length === 0;
 
       var profile = {
-        id: generateProfileId(),
+        id: _editingProfile ? _editingProfile.id : generateProfileId(),
         name: name,
         type: _npType,
         icon: _npIcon,
         colourIndex: _npColorIndex,
         answers: _npAnswers,
-        isDefault: isFirst,
+        isDefault: _editingProfile ? _editingProfile.isDefault : isFirst,
         lastUsed: now,
-        createdAt: now,
+        createdAt: _editingProfile ? _editingProfile.createdAt : now,
       };
 
       if (_npDocument) {
@@ -645,10 +711,9 @@ document.addEventListener('DOMContentLoaded', function () {
         chrome.storage.local.set({ questionnaire_completed: true }, resolve);
       });
 
-      npSaveBtn.textContent = 'Saved!';
+      npSaveBtn.textContent = _editingProfile ? 'Updated!' : 'Saved!';
       setTimeout(function () {
         cancelNewProfile();
-        npSaveBtn.textContent = 'Save Profile';
         npSaveBtn.disabled = false;
         npSaveStatus.textContent = '';
         loadProfiles();

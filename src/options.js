@@ -49,13 +49,12 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // ─── Tier gating ─────────────────────────────────────────────────────────
-  var backupSection = document.getElementById('backupSection');
   var imageQualitySection = document.getElementById('imageQualitySection');
 
   chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
     var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
     if (tier === 'free') {
-      [backupSection, imageQualitySection].forEach(function (section) {
+      [imageQualitySection].forEach(function (section) {
         if (!section) return;
         section.classList.add('locked');
         var toggle = section.querySelector('input[type="checkbox"]');
