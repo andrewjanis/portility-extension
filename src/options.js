@@ -380,4 +380,11 @@ document.addEventListener('DOMContentLoaded', function () {
     loadUsageInfo();
   });
 
+  // ─── Version label ─────────────────────────────────────────────────────
+  var versionLabel = document.getElementById('versionLabel');
+  if (versionLabel) {
+    var manifest = chrome.runtime.getManifest();
+    versionLabel.textContent = 'Portility v' + manifest.version;
+  }
+
 });
