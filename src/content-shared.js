@@ -206,9 +206,33 @@
       addImg(imgs[i], i);
     }
 
-    // For Human turns, also search sibling/parent containers for uploaded images.
-    // Platforms (ChatGPT, Claude) often render user-uploaded images in a sibling
-    // container adjacent to the text element rather than inside it.
+    // File links inside the element itself
+    var seenHrefs = {};
+    function addFileLink(link) {
+      var href = link.href || '';
+      if (!href || seenHrefs[href]) return;
+      if (FILE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(href)) {
+        seenHrefs[href] = true;
+        assets.push({
+          type: IMAGE_EXTENSIONS.test(href) ? 'image' : 'file',
+          url: href,
+          alt: link.textContent.trim() || '',
+          thumbnailUrl: IMAGE_EXTENSIONS.test(href) ? href : null,
+          filename: extractFilenameFromUrl(href) || ('file_' + turnIndex + '_' + assets.length),
+          turnIndex: turnIndex,
+          role: role,
+        });
+      }
+    }
+
+    var links = el.querySelectorAll('a[href]');
+    for (var j = 0; j < links.length; j++) {
+      addFileLink(links[j]);
+    }
+
+    // For Human turns, also search sibling/parent containers for uploaded files
+    // and images. Platforms (ChatGPT, Claude, Gemini) often render user-uploaded
+    // attachments in a sibling container adjacent to the text element.
     if (role === 'Human') {
       var node = el;
       for (var level = 0; level < 5; level++) {
@@ -217,32 +241,18 @@
         var siblings = parent.children;
         for (var s = 0; s < siblings.length; s++) {
           if (siblings[s] === node || siblings[s] === el) continue;
-          // Stop if sibling contains another conversation turn (avoid cross-turn leaking)
+          // Skip if sibling contains another conversation turn (avoid cross-turn leaking)
           if (siblings[s].querySelector('[data-message-author-role], [data-testid="user-message"], [data-testid="human-turn"], [class*="human-turn"], [class*="font-claude-response"], .model-response-text, [data-turn-role]')) continue;
           var sibImgs = siblings[s].querySelectorAll('img');
           for (var si = 0; si < sibImgs.length; si++) {
             addImg(sibImgs[si], assets.length + si);
           }
+          var sibLinks = siblings[s].querySelectorAll('a[href]');
+          for (var sl = 0; sl < sibLinks.length; sl++) {
+            addFileLink(sibLinks[sl]);
+          }
         }
         node = parent;
-      }
-    }
-
-    // File links
-    var links = el.querySelectorAll('a[href]');
-    for (var j = 0; j < links.length; j++) {
-      var link = links[j];
-      var href = link.href || '';
-      if (FILE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(href)) {
-        assets.push({
-          type: IMAGE_EXTENSIONS.test(href) ? 'image' : 'file',
-          url: href,
-          alt: link.textContent.trim() || '',
-          thumbnailUrl: IMAGE_EXTENSIONS.test(href) ? href : null,
-          filename: extractFilenameFromUrl(href) || ('file_' + turnIndex + '_' + j),
-          turnIndex: turnIndex,
-          role: role,
-        });
       }
     }
 
