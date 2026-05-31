@@ -889,6 +889,7 @@ async function handleSummarizePro(request, env, corsHeaders) {
   var body = await request.json();
   var conversation = body.conversation || '';
   var assets = body.assets || [];
+  var images = body.images || [];
 
   if (!conversation) {
     return new Response(JSON.stringify({ error: 'No conversation provided' }), {
@@ -931,10 +932,29 @@ async function handleSummarizePro(request, env, corsHeaders) {
       conversation.substring(conversation.length - keepEnd);
   }
 
-  var userContent = 'Here is the conversation to analyze:\n\n' + conversation;
+  var userText = 'Here is the conversation to analyze:\n\n' + conversation;
   if (assets.length > 0) {
-    userContent += '\n\nHere are the assets detected in the conversation DOM:\n' +
+    userText += '\n\nHere are the assets detected in the conversation DOM:\n' +
       JSON.stringify(assets, null, 2);
+  }
+
+  // Build user content: multi-modal array when images present, plain string otherwise
+  var userContent;
+  if (images.length > 0) {
+    userContent = [{ type: 'text', text: userText }];
+    for (var i = 0; i < images.length; i++) {
+      var img = images[i];
+      var match = (img.dataUrl || '').match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (!match) continue;
+      var label = img.filename || img.alt || ('Image ' + (i + 1));
+      userContent.push({ type: 'text', text: '\n[Image: ' + label + ']' });
+      userContent.push({
+        type: 'image',
+        source: { type: 'base64', media_type: match[1], data: match[2] },
+      });
+    }
+  } else {
+    userContent = userText;
   }
 
   var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
@@ -981,6 +1001,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
   var body = await request.json();
   var brief = body.brief || '';
   var platform = body.platform || '';
+  var images = body.images || [];
 
   if (!brief) {
     return new Response(JSON.stringify({ error: 'No brief provided' }), {
@@ -1001,12 +1022,33 @@ async function handleSecondOpinion(request, env, corsHeaders) {
 
   var systemPrompt = 'You are reviewing a project brief generated from a conversation on a different AI platform. Analyze independently: soundness of conclusions, risks/gaps/blind spots, alternative approaches, priority assessment.';
 
+  var briefText = 'Here is the project brief to review:\n\n' + brief;
+
   var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
   var startTime = Date.now();
   var response, data, text;
 
   // Platform pairing: Claude→ChatGPT, ChatGPT→Claude, Gemini→ChatGPT
   if (platform === 'chatgpt') {
+    // Build Anthropic user content: multi-modal when images present
+    var anthropicContent;
+    if (images.length > 0) {
+      anthropicContent = [{ type: 'text', text: briefText }];
+      for (var ai = 0; ai < images.length; ai++) {
+        var aImg = images[ai];
+        var aMatch = (aImg.dataUrl || '').match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (!aMatch) continue;
+        var aLabel = aImg.filename || aImg.alt || ('Image ' + (ai + 1));
+        anthropicContent.push({ type: 'text', text: '\n[Image: ' + aLabel + ']' });
+        anthropicContent.push({
+          type: 'image',
+          source: { type: 'base64', media_type: aMatch[1], data: aMatch[2] },
+        });
+      }
+    } else {
+      anthropicContent = briefText;
+    }
+
     // Call Anthropic Claude
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1020,7 +1062,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
         max_tokens: 4096,
         system: systemPrompt,
         messages: [
-          { role: 'user', content: 'Here is the project brief to review:\n\n' + brief },
+          { role: 'user', content: anthropicContent },
         ],
       }),
     });
@@ -1049,6 +1091,24 @@ async function handleSecondOpinion(request, env, corsHeaders) {
     });
 
   } else {
+    // Build OpenAI user content: multi-modal when images present
+    var openaiContent;
+    if (images.length > 0) {
+      openaiContent = [{ type: 'text', text: briefText }];
+      for (var oi = 0; oi < images.length; oi++) {
+        var oImg = images[oi];
+        if (!oImg.dataUrl) continue;
+        var oLabel = oImg.filename || oImg.alt || ('Image ' + (oi + 1));
+        openaiContent.push({ type: 'text', text: '\n[Image: ' + oLabel + ']' });
+        openaiContent.push({
+          type: 'image_url',
+          image_url: { url: oImg.dataUrl, detail: 'auto' },
+        });
+      }
+    } else {
+      openaiContent = briefText;
+    }
+
     // claude or gemini → call OpenAI ChatGPT
     response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -1061,7 +1121,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
         max_tokens: 4096,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'Here is the project brief to review:\n\n' + brief },
+          { role: 'user', content: openaiContent },
         ],
       }),
     });
@@ -1141,7 +1201,15 @@ async function handleCompare(request, env, corsHeaders) {
     'When two models both propose frameworks, check whether the frameworks lead to the same actionable conclusions, not just whether they sound similar.\n\n' +
     'SUBJECTIVE questions: When both models express the same sentiment or values using different words, ' +
     'credit that as agreement. Do not penalize stylistic differences on opinion-based content. ' +
-    'If both models advocate the same position with compatible reasoning, score 85-100.';
+    'If both models advocate the same position with compatible reasoning, score 85-100.\n\n' +
+    'CALIBRATION EXAMPLES (human-validated correct scores):\n\n' +
+    'FACTUAL — "Age requirements for House vs Senate": Both models stated identical core facts (25 and 30). Correct score: 100.\n' +
+    'FACTUAL — "Joyce\'s Penelope episode technique": Both identified same technique and punctuation count; minor differences in supporting context. Correct score: 95.\n\n' +
+    'ANALYTICAL — "Medical chest pain diagnostic approach": Models discussed same topic but disagreed on timing priority (simultaneous vs sequential). Discussing the same topic is NOT agreement — they must reach the same conclusion. AI overestimated agreement. Correct score: 74.\n' +
+    'ANALYTICAL — "Quantum computing impact on cybersecurity": Models focused on fundamentally different technical factors (error correction thresholds vs quantum algorithms). AI overestimated agreement at 3/5; human corrected to 2/5. Correct score: 54.\n\n' +
+    'SUBJECTIVE — "Unreliable narration effectiveness (subtle vs overt)": Both concluded each approach is effective for different reasons. Similar high-level sentiment but nuanced differences in supporting analysis. Correct score: 79.\n' +
+    'SUBJECTIVE — "Philosophical exploration of free will": Both models advocated compatible positions with aligned reasoning and values. Correct score: 100.\n\n' +
+    'Use these examples to anchor your scoring. When you see a similar pattern, align your score with the corresponding example range.';
 
   var userContent = 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion;
 

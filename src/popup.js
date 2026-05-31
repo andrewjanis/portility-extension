@@ -369,6 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const upgradeBtn = document.getElementById('upgradeBtn');
   const secondOpinionBtn = document.getElementById('secondOpinionBtn');
   const portInstructionsBtnFree = document.getElementById('portInstructionsBtnFree');
+  const includeImagesLabel = document.getElementById('includeImagesLabel');
   const proBackBtn = document.getElementById('proBackBtn');
   const proAssetTableBody = document.getElementById('proAssetTableBody');
   const proConfirmBtn = document.getElementById('proConfirmBtn');
@@ -412,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let _proData = null;
   let _pmcProExtractPromise = null; // background extraction promise for PMC Pro
   let _pmcProTab = null; // tab info for PMC Pro flow
+  let _imageConfirmResolve = null; // pending promise resolve for image selection
 
   // ── User tier state ───────────────────────────────────────────────────
   let _userTier = 'free'; // 'free', 'paid', 'paid2', or 'paid3'
@@ -1299,6 +1301,7 @@ document.addEventListener('DOMContentLoaded', () => {
     instructionsCheckboxLabel.style.display = 'none';
     portTextToggle.style.display = 'none';
     includeProfileLabel.style.display = 'none';
+    includeImagesLabel.style.display = 'none';
     exitProfileScreens();
     showScreen('screen2');
   }
@@ -1963,6 +1966,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setAllDestBtnsDisabled(false);
     portTextToggle.style.display = 'none';
     includeProfileLabel.style.display = 'none';
+    includeImagesLabel.style.display = 'none';
 
     // Show instructions checkbox only if user has completed the questionnaire
     chrome.storage.local.get('questionnaire_completed', function (data) {
@@ -2058,9 +2062,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         var portContent = extractResponse.text;
-        var images = (extractResponse.assets || []).filter(function (a) {
-          return a.type === 'image' && a.dataUrl;
-        });
+
+        // Read captured images from chrome.storage.local (stored by content script)
+        var images = [];
+        var capturedImageCount = extractResponse.capturedImageCount || 0;
+        if (capturedImageCount > 0) {
+          var imgData = await new Promise(function (resolve) {
+            chrome.storage.local.get('portility_captured_images', function (d) { resolve(d); });
+          });
+          var allCapturedImages = imgData.portility_captured_images || [];
+
+          // Full-text mode: show captured images for selection (no AI reasons)
+          if (pmcTextMode !== 'summary' && allCapturedImages.length > 0) {
+            setScreen2Status('Select images to include\u2026');
+            var fullTextSelected = await showImageSelection(allCapturedImages, null);
+            images = fullTextSelected.map(function(i) { return allCapturedImages[i]; });
+          }
+        }
 
         // Include profile instructions if checkbox is checked
         var includeProfile = includeProfileCheckbox.checked;
@@ -2097,12 +2115,18 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!proxyBase) throw new Error('Proxy URL not configured.');
 
           var phDistinctId = await getDistinctId();
+          // Strip dataUrl from assets before sending to API (too large for request body)
+          var assetsForApi = (extractResponse.assets || []).map(function (a) {
+            var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, role: a.role, turnIndex: a.turnIndex };
+            if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:')) copy.thumbnailUrl = a.thumbnailUrl;
+            return copy;
+          });
           var summaryResp = await fetch(proxyBase + '/summarize-pro', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': phDistinctId },
             body: JSON.stringify({
               conversation: extractResponse.text,
-              assets: extractResponse.assets || [],
+              assets: assetsForApi,
             }),
           });
           if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
@@ -2148,9 +2172,14 @@ document.addEventListener('DOMContentLoaded', () => {
           chrome.storage.local.set({ lastProBrief: { brief: _proData.brief, timestamp: Date.now() } });
 
           portContent = buildDownloadContent(_proData, false);
-          images = (_proData.assets || []).filter(function (a) {
-            return a.selected && a.type === 'image' && a.dataUrl;
-          });
+
+          // Summary mode: show captured images for selection, enriched with AI reasons
+          if (capturedImageCount > 0 && allCapturedImages && allCapturedImages.length > 0) {
+            var imageAssets = mergedAssets.filter(function(a) { return a.type === 'image'; });
+            setScreen2Status('Select images to include\u2026');
+            var summarySelected = await showImageSelection(allCapturedImages, imageAssets);
+            images = summarySelected.map(function(i) { return allCapturedImages[i]; });
+          }
         }
 
         // Prepend profile instructions if available
@@ -2176,13 +2205,19 @@ document.addEventListener('DOMContentLoaded', () => {
           await writeClipboard(portContent);
           var storagePayload = { portility_pending_paste: portContent };
           if (images.length > 0) {
-            storagePayload.portility_pending_images = images.map(function (a) {
-              return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg' };
-            });
+            storagePayload.portility_pending_images = images;
           }
-          await new Promise(function (resolve) {
-            chrome.storage.local.set(storagePayload, resolve);
+          await new Promise(function (resolve, reject) {
+            chrome.storage.local.set(storagePayload, function () {
+              if (chrome.runtime.lastError) {
+                console.error('[Portility] Storage write failed:', chrome.runtime.lastError.message);
+                reject(new Error('Failed to store images for porting: ' + chrome.runtime.lastError.message));
+              } else {
+                resolve();
+              }
+            });
           });
+          chrome.storage.local.remove('portility_captured_images');
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
           var statusMsg = images.length > 0
             ? 'Brief + ' + images.length + ' image(s) porting!'
@@ -2253,8 +2288,15 @@ document.addEventListener('DOMContentLoaded', () => {
             imagesHaveDataUrl: selectedImages.map(function (a) { return !!a.dataUrl; }),
           });
 
-          await new Promise(function (resolve) {
-            chrome.storage.local.set(storagePayload, resolve);
+          await new Promise(function (resolve, reject) {
+            chrome.storage.local.set(storagePayload, function () {
+              if (chrome.runtime.lastError) {
+                console.error('[Portility] Storage write failed:', chrome.runtime.lastError.message);
+                reject(new Error('Failed to store images for porting: ' + chrome.runtime.lastError.message));
+              } else {
+                resolve();
+              }
+            });
           });
 
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
@@ -2377,25 +2419,43 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.remove('pro-review-active');
   }
 
+  // Check if two descriptions refer to the same asset via word overlap
+  function assetDescriptionsMatch(a, b) {
+    if (!a || !b) return false;
+    // Strip punctuation, split into significant words (3+ chars)
+    var wordsA = a.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(function(w) { return w.length >= 3; });
+    var wordsB = b.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(function(w) { return w.length >= 3; });
+    if (wordsA.length === 0 || wordsB.length === 0) return false;
+    var setB = {};
+    for (var i = 0; i < wordsB.length; i++) setB[wordsB[i]] = true;
+    var overlap = 0;
+    for (var j = 0; j < wordsA.length; j++) {
+      if (setB[wordsA[j]]) overlap++;
+    }
+    var smaller = Math.min(wordsA.length, wordsB.length);
+    return overlap >= Math.ceil(smaller * 0.5);
+  }
+
   function mergeAssets(extractedAssets, sonnetAssets) {
     var merged = [];
+    var matchedExtractedIndices = {};
 
     for (var i = 0; i < sonnetAssets.length; i++) {
       var sa = sonnetAssets[i];
       var matched = null;
+      var matchedIdx = -1;
+      var saDesc = sa.description || '';
       for (var j = 0; j < extractedAssets.length; j++) {
+        if (matchedExtractedIndices[j]) continue;
         var ea = extractedAssets[j];
-        if (ea.filename && sa.description &&
-            sa.description.toLowerCase().includes(ea.filename.toLowerCase())) {
+        // Match by word overlap against filename or alt text
+        if (assetDescriptionsMatch(saDesc, ea.filename) || assetDescriptionsMatch(saDesc, ea.alt)) {
           matched = ea;
-          break;
-        }
-        if (ea.alt && sa.description &&
-            sa.description.toLowerCase().includes(ea.alt.toLowerCase())) {
-          matched = ea;
+          matchedIdx = j;
           break;
         }
       }
+      if (matchedIdx >= 0) matchedExtractedIndices[matchedIdx] = true;
 
       merged.push({
         id: sa.id || ('asset_' + i),
@@ -2405,6 +2465,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reason: sa.reason || '',
         url: matched ? matched.url : null,
         thumbnailUrl: matched ? matched.thumbnailUrl : null,
+        dataUrl: matched ? matched.dataUrl : null,
         filename: matched ? matched.filename : (sa.description || 'asset_' + i),
         selected: sa.important !== false,
       });
@@ -2412,11 +2473,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add extracted assets not matched to Sonnet's list
     for (var k = 0; k < extractedAssets.length; k++) {
+      if (matchedExtractedIndices[k]) continue;
       var ea2 = extractedAssets[k];
-      var alreadyMatched = merged.some(function (m) {
-        return m.url === ea2.url && m.url;
-      });
-      if (!alreadyMatched && ea2.url) {
+      if (ea2.url) {
         merged.push({
           id: 'extra_' + k,
           type: ea2.type,
@@ -2425,6 +2484,7 @@ document.addEventListener('DOMContentLoaded', () => {
           reason: 'Detected in conversation but not flagged by AI analysis',
           url: ea2.url,
           thumbnailUrl: ea2.thumbnailUrl,
+          dataUrl: ea2.dataUrl || null,
           filename: ea2.filename,
           selected: false,
         });
@@ -2432,6 +2492,123 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     return merged;
+  }
+
+  /**
+   * Show the proReview overlay with per-image checkboxes.
+   * Driven by capturedImages (the actual portable images in storage).
+   * Optional aiAssets are used to enrich rows with AI-provided reasons.
+   * Returns a promise that resolves with an array of selected indices
+   * into the capturedImages array.
+   */
+  // Minimum dataUrl length to consider an image "real" (filters favicons/logos).
+  // A 32x32 icon at 0.7 JPEG quality is ~3-5KB base64 (~5000-7000 chars).
+  // Real photos are 20KB+ (~27000+ chars).
+  var MIN_IMAGE_DATA_LENGTH = 10000;
+
+  function showImageSelection(capturedImages, aiAssets) {
+    proAssetTableBody.innerHTML = '';
+
+    // Filter out tiny images (favicons, logos, tiny thumbnails)
+    var realImages = capturedImages.filter(function(ci) {
+      return ci.dataUrl && ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
+    });
+
+    if (realImages.length === 0) return Promise.resolve([]);
+
+    // Build a map from original index to filtered index so we can
+    // return indices into the original capturedImages array
+    var originalIndices = [];
+    for (var oi = 0; oi < capturedImages.length; oi++) {
+      if (capturedImages[oi].dataUrl && capturedImages[oi].dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
+        originalIndices.push(oi);
+      }
+    }
+
+    // Only match against AI-analyzed assets (exclude "extra" detected ones)
+    var flaggedAssets = aiAssets ? aiAssets.filter(function(a) {
+      return !a.id || !a.id.startsWith('extra_');
+    }) : null;
+
+    realImages.forEach(function(ci, i) {
+      var tr = document.createElement('tr');
+
+      // Try to find a matching AI-flagged asset for this captured image
+      var aiMatch = null;
+      if (flaggedAssets && flaggedAssets.length > 0) {
+        var ciUrl = (ci.url || '').toLowerCase();
+        var ciFile = (ci.filename || '').toLowerCase();
+        for (var a = 0; a < flaggedAssets.length; a++) {
+          var aUrl = (flaggedAssets[a].url || '').toLowerCase();
+          var af = (flaggedAssets[a].filename || '').toLowerCase();
+          var ad = (flaggedAssets[a].description || '').toLowerCase();
+          if (ciUrl && aUrl && ciUrl === aUrl) {
+            aiMatch = flaggedAssets[a];
+            break;
+          }
+          if (ciFile && (af === ciFile || ad.indexOf(ciFile.replace(/\.[^.]+$/, '')) >= 0)) {
+            aiMatch = flaggedAssets[a];
+            break;
+          }
+          if (assetDescriptionsMatch(ciFile, ad) || assetDescriptionsMatch(ci.alt || '', ad)) {
+            aiMatch = flaggedAssets[a];
+            break;
+          }
+        }
+      }
+
+      // Pre-select if AI flagged it, or if no AI data available (full-text mode)
+      var tdCheck = document.createElement('td');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = aiMatch ? true : !flaggedAssets || flaggedAssets.length === 0;
+      cb.setAttribute('data-asset-index', String(originalIndices[i]));
+      tdCheck.appendChild(cb);
+      tr.appendChild(tdCheck);
+
+      // Asset description cell with thumbnail
+      var tdAsset = document.createElement('td');
+      if (ci.dataUrl) {
+        var img = document.createElement('img');
+        img.src = ci.dataUrl;
+        img.className = 'pro-asset-thumb';
+        tdAsset.appendChild(img);
+        tdAsset.appendChild(document.createTextNode(' '));
+      }
+      var label = (aiMatch && aiMatch.description) || ci.alt || ci.filename || 'Image ' + (i + 1);
+      tdAsset.appendChild(document.createTextNode(label));
+      tr.appendChild(tdAsset);
+
+      // Type badge cell
+      var tdType = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'pro-asset-type image';
+      badge.textContent = 'image';
+      tdType.appendChild(badge);
+      tr.appendChild(tdType);
+
+      // Reason cell
+      var tdWhy = document.createElement('td');
+      tdWhy.className = 'pro-asset-reason';
+      tdWhy.textContent = (aiMatch && aiMatch.reason) || 'Detected in conversation';
+      tr.appendChild(tdWhy);
+
+      proAssetTableBody.appendChild(tr);
+    });
+
+    // Show the overlay
+    document.getElementById('proLoading').style.display = 'none';
+    document.getElementById('proContent').style.display = 'block';
+    document.getElementById('proAssetsSection').style.display = 'block';
+    document.getElementById('proNoAssets').style.display = 'none';
+    proError.textContent = '';
+    proStatus.textContent = '';
+    proConfirmBtn.disabled = false;
+    document.body.classList.add('pro-review-active');
+
+    return new Promise(function(resolve) {
+      _imageConfirmResolve = resolve;
+    });
   }
 
   function buildDownloadContent(data, embedImages) {
@@ -2516,6 +2693,7 @@ document.addEventListener('DOMContentLoaded', () => {
       instructionsCheckboxLabel.style.display = 'none';
       portTextToggle.style.display = 'block';
       includeProfileLabel.style.display = 'flex';
+      includeImagesLabel.style.display = 'none';
 
       // Restore saved settings (toggle + checkbox + profile selection)
       restorePmcSettings();
@@ -2555,6 +2733,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       });
 
+      // Images are now handled via per-image selection in handleDestination
+      // (errors from extraction are handled there too)
+
     } catch (err) {
       crumb('pro_failed', { error: (err.message || '').substring(0, 200) });
       setStatus(err.message || 'Something went wrong.', true);
@@ -2564,6 +2745,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   proBackBtn.addEventListener('click', function () {
+    // Image selection mode: resolve with empty array (skip all images)
+    if (_imageConfirmResolve) {
+      _imageConfirmResolve([]);
+      _imageConfirmResolve = null;
+      document.body.classList.remove('pro-review-active');
+      return;
+    }
+    // Pro brief review mode
     if (_proData) {
       trackEvent('pro_brief_cancelled', {
         sourcePlatform: _proData.sourcePlatform,
@@ -2574,6 +2763,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   proConfirmBtn.addEventListener('click', async function () {
+    // Image selection mode: resolve with selected indices (into original capturedImages)
+    if (_imageConfirmResolve) {
+      var checkboxes = proAssetTableBody.querySelectorAll('input[type="checkbox"]');
+      var selectedIndices = [];
+      for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i].checked) {
+          selectedIndices.push(parseInt(checkboxes[i].getAttribute('data-asset-index'), 10));
+        }
+      }
+      _imageConfirmResolve(selectedIndices);
+      _imageConfirmResolve = null;
+      document.body.classList.remove('pro-review-active');
+      return;
+    }
+
+    // Pro brief review mode
     if (!_proData) return;
     crumb('pro_confirm');
 
@@ -2583,11 +2788,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       // Collect user's checkbox selections
-      var checkboxes = proAssetTableBody.querySelectorAll('input[type="checkbox"]');
-      for (var i = 0; i < checkboxes.length; i++) {
-        var idx = parseInt(checkboxes[i].getAttribute('data-asset-index'), 10);
+      var checkboxes2 = proAssetTableBody.querySelectorAll('input[type="checkbox"]');
+      for (var j = 0; j < checkboxes2.length; j++) {
+        var idx = parseInt(checkboxes2[j].getAttribute('data-asset-index'), 10);
         if (_proData.assets[idx]) {
-          _proData.assets[idx].selected = checkboxes[i].checked;
+          _proData.assets[idx].selected = checkboxes2[j].checked;
         }
       }
 
@@ -2621,6 +2826,7 @@ document.addEventListener('DOMContentLoaded', () => {
       instructionsCheckboxLabel.style.display = 'none';
       portTextToggle.style.display = 'none';
       includeProfileLabel.style.display = 'none';
+      includeImagesLabel.style.display = 'none';
       hideProReview();
       showScreen('screen2');
 
@@ -2763,6 +2969,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!extractResponse.text) throw new Error('No conversation text found on page.');
 
+      // Read captured images from storage and filter out tiny ones
+      var soImageData = await new Promise(function (resolve) {
+        chrome.storage.local.get('portility_captured_images', function (d) { resolve(d); });
+      });
+      var soCapturedImages = (soImageData.portility_captured_images || []).filter(function (ci) {
+        return ci.dataUrl && ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
+      });
+      var soImagesForApi = soCapturedImages.map(function (ci) {
+        return { dataUrl: ci.dataUrl, filename: ci.filename || '', alt: ci.alt || '' };
+      });
+
       // Ensure "Reading" step spins for at least 3s before advancing
       var _soStep1Elapsed = Date.now() - _soStartTime;
       if (_soStep1Elapsed < 3000) {
@@ -2773,19 +2990,29 @@ document.addEventListener('DOMContentLoaded', () => {
       updateSOStep(2);
       var soDistinctId = await getDistinctId();
 
+      // Strip dataUrl from assets before sending to API
+      var soAssetsForApi = (extractResponse.assets || []).map(function (a) {
+        var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, role: a.role, turnIndex: a.turnIndex };
+        if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:')) copy.thumbnailUrl = a.thumbnailUrl;
+        return copy;
+      });
+      var soBody = {
+        conversation: extractResponse.text,
+        assets: soAssetsForApi,
+      };
+      if (soImagesForApi.length > 0) soBody.images = soImagesForApi;
       var summarizePromise = fetch(proxyBase + '/summarize-pro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
-        body: JSON.stringify({
-          conversation: extractResponse.text,
-          assets: extractResponse.assets || [],
-        }),
+        body: JSON.stringify(soBody),
       });
 
+      var soOpinionBody = { brief: extractResponse.text, platform: platform };
+      if (soImagesForApi.length > 0) soOpinionBody.images = soImagesForApi;
       var secondOpinionPromise = fetch(proxyBase + '/second-opinion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
-        body: JSON.stringify({ brief: extractResponse.text, platform: platform }),
+        body: JSON.stringify(soOpinionBody),
       });
 
       var [summaryResp, soResp] = await Promise.all([summarizePromise, secondOpinionPromise]);
@@ -3400,6 +3627,7 @@ document.addEventListener('DOMContentLoaded', () => {
       instructionsCheckboxLabel.style.display = 'none';
       portTextToggle.style.display = 'none';
       includeProfileLabel.style.display = 'none';
+      includeImagesLabel.style.display = 'none';
       showScreen('screen2');
     } catch (err) {
       crumb('instr_free_failed', { error: (err.message || '').substring(0, 200) });
