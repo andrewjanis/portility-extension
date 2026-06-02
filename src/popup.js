@@ -59,6 +59,13 @@ async function writeClipboard(text) {
   }
 }
 
+// ─── Filename helper ─────────────────────────────────────────────────────────
+function safeChatFilename(title) {
+  var name = title.replace(/\s*[-|]\s*(Claude|ChatGPT|Gemini|Copilot).*$/i, '').trim();
+  name = name.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
+  return name || 'portility-conversation';
+}
+
 // ─── Error capture ────────────────────────────────────────────────────────────
 const _capturedErrors = [];
 const MAX_ERRORS = 10;
@@ -271,9 +278,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Instructions checkbox ────────────────────────────────────────────────
   const instructionsCheckbox = document.getElementById('instructionsCheckbox');
   const instructionsCheckboxLabel = document.getElementById('instructionsCheckboxLabel');
-  const portTextToggle = document.getElementById('portTextToggle');
-  const portSummaryRadio = document.getElementById('portSummaryRadio');
-  const portFullRadio = document.getElementById('portFullRadio');
   const includeProfileLabel = document.getElementById('includeProfileLabel');
   const includeProfileCheckbox = document.getElementById('includeProfileCheckbox');
   const profileSelect = document.getElementById('profileSelect');
@@ -470,7 +474,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function savePmcSettings() {
     var settings = {
-      textMode: portSummaryRadio.checked ? 'summary' : 'full',
       includeProfile: includeProfileCheckbox.checked,
       selectedProfileId: profileSelect.value || null,
     };
@@ -481,11 +484,6 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get(PMC_SETTINGS_KEY, function (data) {
       var s = data[PMC_SETTINGS_KEY];
       if (!s) return;
-      if (s.textMode === 'full') {
-        portFullRadio.checked = true;
-      } else {
-        portSummaryRadio.checked = true;
-      }
       includeProfileCheckbox.checked = s.includeProfile !== false;
       profileSelect.disabled = !includeProfileCheckbox.checked;
       // selectedProfileId is applied when dropdown is populated
@@ -493,8 +491,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Persist on change
-  portSummaryRadio.addEventListener('change', savePmcSettings);
-  portFullRadio.addEventListener('change', savePmcSettings);
   includeProfileCheckbox.addEventListener('change', function () {
     profileSelect.disabled = !includeProfileCheckbox.checked;
     savePmcSettings();
@@ -1299,7 +1295,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setScreen2Status('');
     setAllDestBtnsDisabled(false);
     instructionsCheckboxLabel.style.display = 'none';
-    portTextToggle.style.display = 'none';
     includeProfileLabel.style.display = 'none';
     includeImagesLabel.style.display = 'none';
     exitProfileScreens();
@@ -1964,7 +1959,6 @@ document.addEventListener('DOMContentLoaded', () => {
     screen2Label.textContent = 'Port conversation to\u2026';
     setScreen2Status('');
     setAllDestBtnsDisabled(false);
-    portTextToggle.style.display = 'none';
     includeProfileLabel.style.display = 'none';
     includeImagesLabel.style.display = 'none';
 
@@ -2037,7 +2031,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── PMC Pro mode: extract (background) → optionally summarize → port ──
     if (_portMode === 'pmc_pro') {
-      var pmcTextMode = portSummaryRadio.checked ? 'summary' : 'full';
+      var pmcTextModeData = await new Promise(function (resolve) {
+        chrome.storage.local.get('portility_pmc_text_mode', function (d) { resolve(d); });
+      });
+      var pmcTextMode = pmcTextModeData.portility_pmc_text_mode || 'full';
       crumb('pmc_pro_dest', { dest: destination, textMode: pmcTextMode });
       try {
         if (!_pmcProExtractPromise) {
@@ -2045,7 +2042,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Wait for background extraction to complete
-        setScreen2Status('Extracting\u2026');
+        setScreen2Status('Extracting conversation\u2026');
         var extractResponse = await _pmcProExtractPromise;
         crumb('pro_extracted', { messageCount: extractResponse.messageCount, assetCount: (extractResponse.assets || []).length });
 
@@ -2188,12 +2185,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Port the content
+        setScreen2Status(destination === 'save' ? 'Saving file\u2026' : 'Opening destination\u2026');
         if (destination === 'save') {
           blob = new Blob([portContent], { type: pmcTextMode === 'summary' ? 'text/markdown' : 'text/plain' });
           blobUrl = URL.createObjectURL(blob);
           chrome.downloads.download({
             url: blobUrl,
-            filename: pmcTextMode === 'summary' ? 'portility-pro-brief.md' : 'portility-conversation.txt',
+            filename: pmcTextMode === 'summary' ? 'portility-pro-brief.md' : safeChatFilename((_pmcProTab && _pmcProTab.title) || '') + '.txt',
             saveAs: true,
           }, function () {
             URL.revokeObjectURL(blobUrl);
@@ -2319,7 +2317,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Chat mode: extract from page ──
     crumb('port_chat_extract');
-    setScreen2Status('Extracting\u2026');
+    setScreen2Status('Extracting conversation\u2026');
 
     try {
       const tabs = await new Promise((resolve) => {
@@ -2371,13 +2369,14 @@ document.addEventListener('DOMContentLoaded', () => {
         finalText = instructions + '\n\n---\n\n' + conversationText;
       }
 
+      setScreen2Status(destination === 'save' ? 'Saving file\u2026' : 'Opening destination\u2026');
       if (destination === 'save') {
         const blob = new Blob([finalText], { type: 'text/plain' });
         const blobUrl = URL.createObjectURL(blob);
 
         chrome.downloads.download({
           url: blobUrl,
-          filename: 'portility-conversation.txt',
+          filename: safeChatFilename(tab.title) + '.txt',
           saveAs: true,
         }, () => {
           URL.revokeObjectURL(blobUrl);
@@ -2698,7 +2697,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (/gemini\.google\.com/i.test(tab.url)) sourcePlatform = 'gemini';
       crumb('pro_start', { platform: sourcePlatform });
 
-      _pmcProTab = { id: tab.id, url: tab.url, sourcePlatform: sourcePlatform };
+      _pmcProTab = { id: tab.id, url: tab.url, title: tab.title, sourcePlatform: sourcePlatform };
 
       // Step 2: Show destination picker immediately with toggle + profile checkbox
       _portMode = 'pmc_pro';
@@ -2706,7 +2705,6 @@ document.addEventListener('DOMContentLoaded', () => {
       setScreen2Status('');
       setAllDestBtnsDisabled(false);
       instructionsCheckboxLabel.style.display = 'none';
-      portTextToggle.style.display = 'block';
       includeProfileLabel.style.display = 'flex';
       includeImagesLabel.style.display = 'none';
 
@@ -2839,7 +2837,6 @@ document.addEventListener('DOMContentLoaded', () => {
       setScreen2Status('');
       setAllDestBtnsDisabled(false);
       instructionsCheckboxLabel.style.display = 'none';
-      portTextToggle.style.display = 'none';
       includeProfileLabel.style.display = 'none';
       includeImagesLabel.style.display = 'none';
       hideProReview();
@@ -3640,7 +3637,6 @@ document.addEventListener('DOMContentLoaded', () => {
       setScreen2Status('');
       setAllDestBtnsDisabled(false);
       instructionsCheckboxLabel.style.display = 'none';
-      portTextToggle.style.display = 'none';
       includeProfileLabel.style.display = 'none';
       includeImagesLabel.style.display = 'none';
       showScreen('screen2');

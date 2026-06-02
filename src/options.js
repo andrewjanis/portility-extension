@@ -50,11 +50,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ─── Tier gating ─────────────────────────────────────────────────────────
   var imageQualitySection = document.getElementById('imageQualitySection');
+  var portTextModeSection = document.getElementById('portTextModeSection');
 
   chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
     var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
     if (tier === 'free') {
-      [imageQualitySection].forEach(function (section) {
+      [imageQualitySection, portTextModeSection].forEach(function (section) {
         if (!section) return;
         section.classList.add('locked');
         var toggle = section.querySelector('input[type="checkbox"]');
@@ -142,6 +143,19 @@ document.addEventListener('DOMContentLoaded', function () {
   // ─── Image compression toggle ─────────────────────────────────────────────
   compressToggle.addEventListener('change', function () {
     chrome.storage.local.set({ portility_compress_images: compressToggle.checked });
+  });
+
+  // ─── Port text mode toggle ──────────────────────────────────────────────
+  var portTextModeToggle = document.getElementById('portTextModeToggle');
+
+  chrome.storage.local.get('portility_pmc_text_mode', function (result) {
+    var mode = result.portility_pmc_text_mode || 'full';
+    portTextModeToggle.checked = mode === 'full';
+  });
+
+  portTextModeToggle.addEventListener('change', function () {
+    var mode = portTextModeToggle.checked ? 'full' : 'summary';
+    chrome.storage.local.set({ portility_pmc_text_mode: mode });
   });
 
   // ─── Manage Port Me ──────────────────────────────────────────────────────
