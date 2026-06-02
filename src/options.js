@@ -40,6 +40,26 @@ document.addEventListener('DOMContentLoaded', function () {
   devTierContainer.addEventListener('change', function (e) {
     if (e.target.name !== 'devTier') return;
     var newTier = e.target.value;
+    // Block paid3 override — server-side only assignment
+    if (newTier === 'paid3') {
+      devTierStatus.textContent = 'paid3 cannot be set via dev override';
+      devTierStatus.style.color = '#ef4444';
+      // Revert to previous selection
+      chrome.storage.local.get('devTierOverride', function (r) {
+        var prev = r.devTierOverride || null;
+        if (prev && prev !== 'paid3') {
+          var match = devTierContainer.querySelector('input[value="' + prev + '"]');
+          if (match) match.checked = true;
+        } else {
+          chrome.storage.local.get('userTier', function (r2) {
+            var actual = (r2.userTier && r2.userTier.tier) || 'free';
+            var match2 = devTierContainer.querySelector('input[value="' + actual + '"]');
+            if (match2) match2.checked = true;
+          });
+        }
+      });
+      return;
+    }
     console.log('[Options] Dev tier override set to:', newTier);
     // Write to separate key so it cannot be overwritten by tier refresh
     chrome.storage.local.set({ devTierOverride: newTier }, function () {
@@ -351,6 +371,15 @@ document.addEventListener('DOMContentLoaded', function () {
         summaryText += ' this month';
       }
     }
+    // Trial info for free users
+    if (summary.trial) {
+      if (summary.trial.started && !summary.trial.expired) {
+        summaryText += ' | Trial: ' + summary.trial.days_remaining + 'd / ' + summary.trial.uses_remaining + ' uses left';
+      } else if (summary.trial.expired) {
+        summaryText += ' | Trial expired';
+      }
+    }
+
     usageSummary.textContent = summaryText;
 
     // History (only for paid users)

@@ -139,7 +139,7 @@ async function verifyFirebaseIdToken(idToken, firebaseApiKey) {
 
 // ─── Usage tiers ────────────────────────────────────────────────────────────
 var USAGE_TIERS = {
-  free:  { limit: 10, monthly: false },
+  free:  { limit: Infinity, monthly: false },
   paid:  { limit: 50, monthly: true },
   paid2: { limit: 150, monthly: true },
   paid3: { limit: Infinity, monthly: true },
@@ -159,6 +159,58 @@ var PRICE_TO_TIER = {
   'price_1TX0BGCJMK2eGD3656Rv2pOh': 'paid2',  // $100/year
   // paid3 (Unlimited) — add Stripe price IDs here when created
 };
+
+// Trial constants
+var TRIAL_DURATION_DAYS = 7;
+var TRIAL_USE_LIMIT = 50;
+var FREE_FEATURES = ['port_my_chat', 'port_me'];
+var ENTITLEMENT_MAP = {
+  paid:  ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
+  paid2: ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
+  paid3: ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
+};
+
+// ─── JSON response helper ────────────────────────────────────────────────────
+function jsonResponse(status, data, corsHeaders) {
+  return new Response(JSON.stringify(data), {
+    status: status,
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
+// ─── Auth + user doc helper (shared by /authorize, /record-use, /use) ────────
+async function authenticateAndReadUser(request, body, env) {
+  var claimedUid = body.firebaseUid;
+  if (!claimedUid) throw { status: 400, error: 'Missing firebaseUid' };
+
+  var authHeader = request.headers.get('Authorization') || '';
+  var idToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (!idToken) throw { status: 401, error: 'Missing Authorization header' };
+
+  var verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseIdToken(idToken, env.FIREBASE_API_KEY);
+  } catch (e) {
+    throw { status: 401, error: 'Invalid token: ' + e.message };
+  }
+  if (verifiedUid !== claimedUid) throw { status: 403, error: 'UID mismatch' };
+
+  var accessToken = await getFirebaseAccessToken(env);
+  var docUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid;
+
+  var docResp = await fetch(docUrl, {
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+  });
+
+  var fields = {};
+  if (docResp.ok) {
+    var doc = await docResp.json();
+    fields = doc.fields || {};
+  }
+
+  return { uid: claimedUid, accessToken: accessToken, docUrl: docUrl, fields: fields };
+}
 
 // ─── Firestore helpers for /use ─────────────────────────────────────────────
 function computeWindowKey(billingAnchorDate) {
@@ -293,8 +345,8 @@ async function handleUse(request, env, corsHeaders) {
   }
 
   var tier = fields.tier?.stringValue || 'free';
-  // Allow client-side dev tier override for testing
-  if (body.tierOverride && USAGE_TIERS[body.tierOverride]) {
+  // Allow client-side dev tier override for testing (block paid3)
+  if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
     tier = body.tierOverride;
   }
   var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
@@ -356,13 +408,15 @@ async function handleUse(request, env, corsHeaders) {
         },
       },
       {
-        transform: {
-          document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/stats/global',
-          fieldTransforms: [
-            { fieldPath: 'total_ports', increment: { integerValue: '1' } },
-            { fieldPath: tierClass === 'free' ? 'total_free_ports' : 'total_paid_ports', increment: { integerValue: '1' } },
-          ],
+        update: {
+          name: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/stats/global',
+          fields: {},
         },
+        updateMask: { fieldPaths: [] },
+        updateTransforms: [
+          { fieldPath: 'total_ports', increment: { integerValue: '1' } },
+          { fieldPath: tierClass === 'free' ? 'total_free_ports' : 'total_paid_ports', increment: { integerValue: '1' } },
+        ],
       },
     ],
   };
@@ -500,6 +554,238 @@ async function handleResetUsage(request, env, corsHeaders) {
   }), {
     headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
   });
+}
+
+// ─── POST /authorize — check entitlement without incrementing ────────────────
+async function handleAuthorize(request, env, corsHeaders) {
+  if (request.method !== 'POST') {
+    return jsonResponse(405, { error: 'Method not allowed' }, corsHeaders);
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return jsonResponse(400, { error: 'Invalid JSON' }, corsHeaders);
+  }
+
+  var feature = body.feature || 'unknown';
+
+  // Free features: always allowed, no gating
+  if (FREE_FEATURES.indexOf(feature) !== -1) {
+    return jsonResponse(200, { allowed: true, gating: 'free_feature' }, corsHeaders);
+  }
+
+  // Authenticate and read user doc
+  var user;
+  try {
+    user = await authenticateAndReadUser(request, body, env);
+  } catch (err) {
+    return jsonResponse(err.status || 500, { error: err.error || 'Auth failed' }, corsHeaders);
+  }
+
+  var tier = user.fields.tier?.stringValue || 'free';
+  // Block paid3 from devTierOverride
+  if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
+    tier = body.tierOverride;
+  }
+  var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
+
+  // ── Subscriber path ──
+  if (tier !== 'free') {
+    // Check entitlement
+    var entitled = ENTITLEMENT_MAP[tier];
+    if (entitled && entitled.indexOf(feature) === -1) {
+      return jsonResponse(200, { allowed: false, reason: 'not_entitled', tier: tier }, corsHeaders);
+    }
+
+    // Read usage_count with migration + reset logic
+    var usageCount;
+    if (user.fields.usage_count !== undefined) {
+      usageCount = parseInt(user.fields.usage_count.integerValue || '0', 10);
+    } else {
+      usageCount = migrateOldUsage(user.fields, tier, tierConfig);
+    }
+
+    // Check reset_date
+    var resetDate = user.fields.reset_date?.timestampValue || null;
+    var now = new Date();
+    if (tierConfig.monthly && resetDate && now > new Date(resetDate)) {
+      usageCount = 0;
+      await firestorePatchFields(user.accessToken, user.docUrl, {
+        usage_count: { integerValue: '0' },
+      }, ['usage_count']);
+    }
+
+    var limit = tierConfig.limit;
+    if (usageCount >= limit) {
+      return jsonResponse(200, {
+        allowed: false,
+        reason: 'limit_reached',
+        used: usageCount,
+        limit: limit,
+        tier: tier,
+        upgradeUrl: UPGRADE_URLS[tier] !== undefined ? UPGRADE_URLS[tier] : null,
+      }, corsHeaders);
+    }
+
+    var warning = null;
+    if (limit !== Infinity && usageCount >= limit * 0.8) {
+      warning = {
+        message: 'You\'ve used ' + usageCount + ' of ' + limit + ' uses this month.',
+        used: usageCount,
+        limit: limit,
+        tier: tier,
+      };
+    }
+
+    return jsonResponse(200, {
+      allowed: true,
+      gating: 'subscriber',
+      used: usageCount,
+      limit: limit,
+      tier: tier,
+      warning: warning,
+    }, corsHeaders);
+  }
+
+  // ── Trial path (tier === 'free') ──
+  var trialStarted = user.fields.trial_started?.booleanValue || false;
+  var trialStartAt = user.fields.trial_start_at?.timestampValue || null;
+  var paidUseCount = parseInt(user.fields.paid_use_count?.integerValue || '0', 10);
+
+  if (trialStarted) {
+    var daysSinceStart = trialStartAt ? (Date.now() - new Date(trialStartAt).getTime()) / (1000 * 60 * 60 * 24) : TRIAL_DURATION_DAYS;
+    var daysRemaining = Math.max(0, Math.ceil(TRIAL_DURATION_DAYS - daysSinceStart));
+    var usesRemaining = Math.max(0, TRIAL_USE_LIMIT - paidUseCount);
+
+    if (daysRemaining <= 0 || usesRemaining <= 0) {
+      return jsonResponse(200, {
+        allowed: false,
+        reason: 'trial_expired',
+        tier: 'free',
+        upgradeUrl: UPGRADE_URLS.free,
+        trial: {
+          days_remaining: 0,
+          uses_remaining: 0,
+          paid_use_count: paidUseCount,
+          started_at: trialStartAt,
+        },
+      }, corsHeaders);
+    }
+
+    return jsonResponse(200, {
+      allowed: true,
+      gating: 'trial',
+      tier: 'free',
+      trial: {
+        days_remaining: daysRemaining,
+        uses_remaining: usesRemaining,
+        paid_use_count: paidUseCount,
+        started_at: trialStartAt,
+      },
+    }, corsHeaders);
+  }
+
+  // Trial not started — start it now
+  await firestorePatchFields(user.accessToken, user.docUrl, {
+    trial_started: { booleanValue: true },
+    trial_start_at: { timestampValue: new Date().toISOString() },
+    paid_use_count: { integerValue: '0' },
+  }, ['trial_started', 'trial_start_at', 'paid_use_count']);
+
+  return jsonResponse(200, {
+    allowed: true,
+    gating: 'trial',
+    tier: 'free',
+    trial: {
+      just_started: true,
+      days_remaining: TRIAL_DURATION_DAYS,
+      uses_remaining: TRIAL_USE_LIMIT,
+      paid_use_count: 0,
+    },
+  }, corsHeaders);
+}
+
+// ─── POST /record-use — increment counters after successful completion ───────
+async function handleRecordUse(request, env, corsHeaders) {
+  if (request.method !== 'POST') {
+    return jsonResponse(405, { error: 'Method not allowed' }, corsHeaders);
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return jsonResponse(400, { error: 'Invalid JSON' }, corsHeaders);
+  }
+
+  var feature = body.feature || 'unknown';
+
+  // Free features don't record usage
+  if (FREE_FEATURES.indexOf(feature) !== -1) {
+    return jsonResponse(200, { recorded: true, gating: 'free_feature' }, corsHeaders);
+  }
+
+  var user;
+  try {
+    user = await authenticateAndReadUser(request, body, env);
+  } catch (err) {
+    return jsonResponse(err.status || 500, { error: err.error || 'Auth failed' }, corsHeaders);
+  }
+
+  var tier = user.fields.tier?.stringValue || 'free';
+  // Block paid3 from devTierOverride
+  if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
+    tier = body.tierOverride;
+  }
+
+  var commitUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';
+
+  var tierClass = tier === 'free' ? 'trial' : 'paid';
+  var counterField = tier === 'free' ? 'paid_use_count' : 'usage_count';
+  var globalField = tier === 'free' ? 'total_trial_ports' : 'total_paid_ports';
+
+  var commitBody = {
+    writes: [
+      {
+        transform: {
+          document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + user.uid,
+          fieldTransforms: [
+            { fieldPath: counterField, increment: { integerValue: '1' } },
+            { fieldPath: 'lifetime_total', increment: { integerValue: '1' } },
+          ],
+        },
+      },
+      {
+        update: {
+          name: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/stats/global',
+          fields: {},
+        },
+        updateMask: { fieldPaths: [] },
+        updateTransforms: [
+          { fieldPath: 'total_ports', increment: { integerValue: '1' } },
+          { fieldPath: globalField, increment: { integerValue: '1' } },
+        ],
+      },
+    ],
+  };
+
+  var commitResp = await fetch(commitUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + user.accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(commitBody),
+  });
+
+  if (!commitResp.ok) {
+    var errText = await commitResp.text();
+    return jsonResponse(500, { error: 'Increment failed: ' + errText }, corsHeaders);
+  }
+
+  // Fire PostHog event
+  trackUsageEvent(env, user.uid, { feature: feature, tier: tier, tier_class: tierClass, used: null, limit: null });
+
+  return jsonResponse(200, { recorded: true }, corsHeaders);
 }
 
 // ─── POST /feedback — save Second Opinion feedback via service account ──────
@@ -683,6 +969,35 @@ async function handleStripeWebhook(request, env) {
     }
   }
 
+  // Handle subscription cancellation — downgrade to free
+  if (event.type === 'customer.subscription.deleted') {
+    const sub = event.data.object;
+    const firebaseUID = sub.metadata?.firebase_uid;
+    if (firebaseUID) {
+      try {
+        const accessToken = await getFirebaseAccessToken(env);
+        const userDocUrl = 'https://firestore.googleapis.com/v1/projects/' +
+          env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + firebaseUID;
+        await fetch(userDocUrl + '?updateMask.fieldPaths=tier&updateMask.fieldPaths=reset_date&updateMask.fieldPaths=usage_count', {
+          method: 'PATCH',
+          headers: {
+            'Authorization': 'Bearer ' + accessToken,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fields: {
+              tier: { stringValue: 'free' },
+              reset_date: { nullValue: null },
+              usage_count: { integerValue: '0' },
+            },
+          }),
+        });
+      } catch (cancelErr) {
+        console.error('[Webhook] subscription.deleted handler failed:', cancelErr.message);
+      }
+    }
+  }
+
   return new Response('Webhook received', { status: 200 });
 }
 
@@ -723,6 +1038,10 @@ export default {
         return await handleSecondOpinion(request, env, corsHeaders);
       } else if (path === '/compare') {
         return await handleCompare(request, env, corsHeaders);
+      } else if (path === '/authorize') {
+        return await handleAuthorize(request, env, corsHeaders);
+      } else if (path === '/record-use') {
+        return await handleRecordUse(request, env, corsHeaders);
       } else if (path === '/use') {
         return await handleUse(request, env, corsHeaders);
       } else if (path === '/reset-usage') {

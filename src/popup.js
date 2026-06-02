@@ -329,7 +329,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function showUsageBlocked(result, feature) {
     result = applyDevTierToResult(result);
     var msg;
-    if (result.limit === Infinity || result.limit === null) {
+    if (result.reason === 'trial_expired') {
+      msg = 'Your free trial has ended. Subscribe to keep using paid tools.';
+    } else if (result.limit === Infinity || result.limit === null) {
       msg = 'You\'ve used ' + (result.used || 0) + ' uses (unlimited).';
     } else {
       msg = 'You\'ve used all ' + result.limit + ' uses';
@@ -364,6 +366,17 @@ document.addEventListener('DOMContentLoaded', () => {
     banner.style.display = 'block';
     banner.onclick = function () { banner.style.display = 'none'; };
     setTimeout(function () { banner.style.display = 'none'; }, 8000);
+  }
+
+  function showTrialStarted() {
+    var banner = document.getElementById('usageWarningBanner');
+    if (!banner) return;
+    banner.textContent = 'Welcome! Your 7-day free trial has started (50 uses).';
+    banner.style.display = 'block';
+    banner.onclick = function () { banner.style.display = 'none'; };
+    setTimeout(function () { banner.style.display = 'none'; }, 8000);
+    // Cache trial status so applyTierUI can show paid buttons
+    chrome.storage.local.set({ trialStatus: { active: true, timestamp: Date.now() } });
   }
 
   // ── Port My Chat Pro elements ──────────────────────────────────────────
@@ -458,8 +471,18 @@ document.addEventListener('DOMContentLoaded', () => {
     var isPaid = _userTier !== 'free';
     console.log('[Popup] User tier:', _userTier);
 
-    if (freeButtonsDiv) freeButtonsDiv.style.display = isPaid ? 'none' : '';
-    if (paidButtonsDiv) paidButtonsDiv.style.display = isPaid ? '' : 'none';
+    if (isPaid) {
+      if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
+      if (paidButtonsDiv) paidButtonsDiv.style.display = '';
+    } else {
+      // Free users: check for active trial → show paid buttons
+      chrome.storage.local.get('trialStatus', function (data) {
+        var trial = data.trialStatus;
+        var showPaid = trial && trial.active && (Date.now() - trial.timestamp < 7 * 24 * 60 * 60 * 1000);
+        if (freeButtonsDiv) freeButtonsDiv.style.display = showPaid ? 'none' : '';
+        if (paidButtonsDiv) paidButtonsDiv.style.display = showPaid ? '' : 'none';
+      });
+    }
   }
 
   // Check tier on popup load
@@ -468,6 +491,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Port mode state ────────────────────────────────────────────────────
   let _portMode = 'chat'; // 'chat', 'instructions', 'pro_brief', or 'pmc_pro'
   let _decryptedInstructions = null;
+
+  // ── Pending auth for recordUse after successful port ─────────────────
+  let _pendingAuth = null;
+  let _pendingFeature = null;
 
   // ── PMC Pro settings persistence ──────────────────────────────────────
   var PMC_SETTINGS_KEY = 'portility_pmc_pro_settings';
@@ -1032,8 +1059,8 @@ document.addEventListener('DOMContentLoaded', () => {
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
 
-      // Usage gating — atomic check + increment
-      var usageResult = applyDevTierToResult(await useFeature(auth.idToken, auth.firebaseUid, 'port_me_pro'));
+      // Usage gating — authorize (no increment yet)
+      var usageResult = applyDevTierToResult(await authorizeFeature(auth.idToken, auth.firebaseUid, 'port_me_pro'));
       if (!usageResult.allowed) {
         portInstructionsBtn.disabled = false;
         setPortStatus('');
@@ -1041,6 +1068,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       if (usageResult.warning) showUsageWarning(usageResult.warning);
+      if (usageResult.trial && usageResult.trial.just_started) showTrialStarted();
+      _pendingAuth = auth;
+      _pendingFeature = 'port_me_pro';
 
       // Migrate legacy profile if needed
       crumb('instr_migrate');
@@ -2021,6 +2051,11 @@ document.addEventListener('DOMContentLoaded', () => {
           crumb('instr_ported', { dest: destination });
           trackEvent('operating_instructions_ported', { destination: destination });
         }
+        // Record successful use (fire-and-forget)
+        if (_pendingAuth && _pendingFeature) {
+          recordUse(_pendingAuth.idToken, _pendingAuth.firebaseUid, _pendingFeature);
+          _pendingAuth = null; _pendingFeature = null;
+        }
       } catch (err) {
         crumb('instr_failed', { error: (err.message || '').substring(0, 200) });
         setScreen2Status(err.message || 'Something went wrong.', true);
@@ -2228,6 +2263,11 @@ document.addEventListener('DOMContentLoaded', () => {
         _pmcProExtractPromise = null;
         _pmcProTab = null;
         _proData = null;
+        // Record successful use (fire-and-forget)
+        if (_pendingAuth && _pendingFeature) {
+          recordUse(_pendingAuth.idToken, _pendingAuth.firebaseUid, _pendingFeature);
+          _pendingAuth = null; _pendingFeature = null;
+        }
       } catch (err) {
         crumb('pmc_pro_failed', { error: (err.message || '').substring(0, 200) });
         setScreen2Status(err.message || 'Something went wrong.', true);
@@ -2673,9 +2713,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('');
 
     try {
-      // Usage gating — atomic check + increment
+      // Usage gating — authorize (no increment yet)
       var auth = await ensureAuthenticated();
-      var usageResult = applyDevTierToResult(await useFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro'));
+      var usageResult = applyDevTierToResult(await authorizeFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro'));
       if (!usageResult.allowed) {
         proChatBtn.disabled = false;
         setStatus('');
@@ -2683,6 +2723,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       if (usageResult.warning) showUsageWarning(usageResult.warning);
+      if (usageResult.trial && usageResult.trial.just_started) showTrialStarted();
+      _pendingAuth = auth;
+      _pendingFeature = 'port_my_chat_pro';
 
       // Step 1: Get active tab
       const tabs = await new Promise(function (resolve) {
@@ -2924,16 +2967,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Second Opinion ────────────────────────────────────────────────────────
   async function triggerSecondOpinion() {
-    // Usage gating — atomic check + increment
+    // Usage gating — authorize (no increment yet)
     var soAuth;
     try {
       soAuth = await ensureAuthenticated();
-      var soUsageResult = applyDevTierToResult(await useFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion'));
+      var soUsageResult = applyDevTierToResult(await authorizeFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion'));
       if (!soUsageResult.allowed) {
         showUsageBlocked(soUsageResult, 'second_opinion');
         return;
       }
       if (soUsageResult.warning) showUsageWarning(soUsageResult.warning);
+      if (soUsageResult.trial && soUsageResult.trial.just_started) showTrialStarted();
+      _pendingAuth = soAuth;
+      _pendingFeature = 'second_opinion';
     } catch (e) {
       setStatus(e.message || 'Auth failed. Try signing in.', true);
       return;
@@ -3097,6 +3143,11 @@ document.addEventListener('DOMContentLoaded', () => {
         comparison: compareData,
         durationMs: Date.now() - _soStartTime,
       });
+      // Record successful use (fire-and-forget)
+      if (_pendingAuth && _pendingFeature) {
+        recordUse(_pendingAuth.idToken, _pendingAuth.firebaseUid, _pendingFeature);
+        _pendingAuth = null; _pendingFeature = null;
+      }
     } catch (err) {
       stopNeedleSweep();
       resetSOSteps();

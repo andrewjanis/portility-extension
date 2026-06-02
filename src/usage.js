@@ -9,7 +9,7 @@
 'use strict';
 
 var USAGE_TIERS = {
-  free:  { limit: 10, monthly: false, label: 'Free' },
+  free:  { limit: Infinity, monthly: false, label: 'Free' },
   paid:  { limit: 50, monthly: true, label: 'Pro' },
   paid2: { limit: 150, monthly: true, label: 'Premium' },
   paid3: { limit: Infinity, monthly: true, label: 'Unlimited' },
@@ -25,8 +25,75 @@ var UPGRADE_URLS = {
 var USAGE_PROJECT_ID = 'portility';
 
 /**
+ * Authorize a paid feature use (check entitlement without incrementing).
+ * @param {string} idToken - Firebase ID token
+ * @param {string} firebaseUid
+ * @param {string} feature - e.g. 'port_me_pro', 'port_my_chat_pro', 'second_opinion'
+ * @returns {Promise<{allowed: boolean, gating?: string, reason?: string, trial?: object, used?: number, limit?: number, tier?: string, warning?: object|null, upgradeUrl?: string|null}>}
+ */
+async function authorizeFeature(idToken, firebaseUid, feature) {
+  var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+  if (!proxyBase) throw new Error('Worker URL not configured.');
+
+  var payload = { firebaseUid: firebaseUid, feature: feature };
+  var override = await new Promise(function (resolve) {
+    chrome.storage.local.get('devTierOverride', function (r) { resolve(r.devTierOverride || null); });
+  });
+  if (override && override !== 'paid3') payload.tierOverride = override;
+
+  var resp = await fetch(proxyBase + '/authorize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + idToken,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (resp.status === 401 || resp.status === 403) {
+    var errData = await resp.json().catch(function () { return {}; });
+    throw new Error(errData.error || 'Authentication failed');
+  }
+
+  if (!resp.ok && resp.status !== 200) {
+    var errBody = await resp.json().catch(function () { return {}; });
+    throw new Error(errBody.error || 'Authorization check failed');
+  }
+
+  return resp.json();
+}
+
+/**
+ * Record a successful paid feature use (fire-and-forget).
+ * @param {string} idToken - Firebase ID token
+ * @param {string} firebaseUid
+ * @param {string} feature
+ */
+async function recordUse(idToken, firebaseUid, feature) {
+  var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
+  if (!proxyBase) return;
+
+  var payload = { firebaseUid: firebaseUid, feature: feature };
+  var override = await new Promise(function (resolve) {
+    chrome.storage.local.get('devTierOverride', function (r) { resolve(r.devTierOverride || null); });
+  });
+  if (override && override !== 'paid3') payload.tierOverride = override;
+
+  fetch(proxyBase + '/record-use', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + idToken,
+    },
+    body: JSON.stringify(payload),
+  }).catch(function (e) {
+    console.warn('[Usage] recordUse failed:', e.message);
+  });
+}
+
+/**
  * Single atomic call: check usage + increment if allowed.
- * Replaces the old checkUsageAllowed + incrementUsage two-step.
+ * @deprecated Use authorizeFeature + recordUse instead. Kept for backward compat.
  * @param {string} idToken - Firebase ID token
  * @param {string} firebaseUid
  * @param {string} feature - e.g. 'port_me_pro', 'port_my_chat_pro', 'second_opinion'
@@ -79,7 +146,8 @@ async function getCurrentUsageSummary(idToken, firebaseUid, userTier) {
   var url = 'https://firestore.googleapis.com/v1/projects/' + USAGE_PROJECT_ID +
     '/databases/(default)/documents/users/' + firebaseUid +
     '?mask.fieldPaths=usage_count&mask.fieldPaths=reset_date' +
-    '&mask.fieldPaths=lifetimeFreeUsed&mask.fieldPaths=billingAnchorDate&mask.fieldPaths=monthlyUsage';
+    '&mask.fieldPaths=lifetimeFreeUsed&mask.fieldPaths=billingAnchorDate&mask.fieldPaths=monthlyUsage' +
+    '&mask.fieldPaths=trial_started&mask.fieldPaths=trial_start_at&mask.fieldPaths=paid_use_count';
 
   var response = await fetch(url, {
     headers: { 'Authorization': 'Bearer ' + idToken },
@@ -108,12 +176,35 @@ async function getCurrentUsageSummary(idToken, firebaseUid, userTier) {
     used = (mapFields && mapFields[windowKey]) ? parseInt(mapFields[windowKey].integerValue || '0', 10) : 0;
   }
 
+  // Build trial info for free users
+  var trial = null;
+  if (userTier === 'free') {
+    var trialStarted = fields.trial_started?.booleanValue || false;
+    var trialStartAt = fields.trial_start_at?.timestampValue || null;
+    var paidUseCount = parseInt(fields.paid_use_count?.integerValue || '0', 10);
+    if (trialStarted && trialStartAt) {
+      var daysSinceStart = (Date.now() - new Date(trialStartAt).getTime()) / (1000 * 60 * 60 * 24);
+      var daysRemaining = Math.max(0, Math.ceil(7 - daysSinceStart));
+      var usesRemaining = Math.max(0, 50 - paidUseCount);
+      trial = {
+        started: true,
+        expired: daysRemaining <= 0 || usesRemaining <= 0,
+        days_remaining: daysRemaining,
+        uses_remaining: usesRemaining,
+        paid_use_count: paidUseCount,
+      };
+    } else {
+      trial = { started: false, expired: false };
+    }
+  }
+
   return {
     used: used,
     limit: tierConfig.limit,
     tier: userTier,
     tierLabel: tierConfig.label,
     isLifetime: !tierConfig.monthly,
+    trial: trial,
   };
 }
 
