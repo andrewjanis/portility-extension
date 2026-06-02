@@ -301,10 +301,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const usageBlockedOverlay = document.getElementById('usageBlockedOverlay');
   const usageBlockedMsg = document.getElementById('usageBlockedMsg');
   const usageUpgradeBtn = document.getElementById('usageUpgradeBtn');
+  const usageBlockedFreeBtn = document.getElementById('usageBlockedFreeBtn');
   const usageBlockedDismissBtn = document.getElementById('usageBlockedDismissBtn');
 
   usageBlockedDismissBtn.addEventListener('click', function () {
     usageBlockedOverlay.classList.remove('visible');
+  });
+
+  usageBlockedFreeBtn.addEventListener('click', function () {
+    usageBlockedOverlay.classList.remove('visible');
+    // Revert to free buttons
+    if (freeButtonsDiv) freeButtonsDiv.style.display = '';
+    if (paidButtonsDiv) paidButtonsDiv.style.display = 'none';
+    upgradeBtn.textContent = 'Upgrade to Pro';
+    upgradeBtn.dataset.mode = 'upgrade';
+    crumb('trial_revert_free');
+    trackEvent('trial_revert_free');
   });
 
   // When a dev tier override is active, substitute the overridden tier's
@@ -331,6 +343,8 @@ document.addEventListener('DOMContentLoaded', () => {
     var msg;
     if (result.reason === 'trial_expired') {
       msg = 'Your free trial has ended. Subscribe to keep using paid tools.';
+      // Mark trial expired so next popup open shows free buttons + "Upgrade to Pro"
+      chrome.storage.local.set({ trialStatus: { active: false, timestamp: Date.now() } });
     } else if (result.limit === Infinity || result.limit === null) {
       msg = 'You\'ve used ' + (result.used || 0) + ' uses (unlimited).';
     } else {
@@ -346,6 +360,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       usageUpgradeBtn.style.display = 'none';
     }
+    // Show "Continue with Free" option when trial expired
+    usageBlockedFreeBtn.style.display = result.reason === 'trial_expired' ? 'block' : 'none';
     usageBlockedOverlay.classList.add('visible');
 
     trackEvent('usage_blocked', {
@@ -472,15 +488,34 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[Popup] User tier:', _userTier);
 
     if (isPaid) {
+      // Subscriber: show paid buttons only
       if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
       if (paidButtonsDiv) paidButtonsDiv.style.display = '';
     } else {
-      // Free users: check for active trial → show paid buttons
+      // Free user: check for active trial
       chrome.storage.local.get('trialStatus', function (data) {
         var trial = data.trialStatus;
-        var showPaid = trial && trial.active && (Date.now() - trial.timestamp < 7 * 24 * 60 * 60 * 1000);
-        if (freeButtonsDiv) freeButtonsDiv.style.display = showPaid ? 'none' : '';
-        if (paidButtonsDiv) paidButtonsDiv.style.display = showPaid ? '' : 'none';
+        var trialActive = trial && trial.active && (Date.now() - trial.timestamp < 7 * 24 * 60 * 60 * 1000);
+
+        if (trialActive) {
+          // Active trial: show paid buttons
+          if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
+          if (paidButtonsDiv) paidButtonsDiv.style.display = '';
+        } else {
+          // No trial or expired: show free buttons + CTA
+          if (freeButtonsDiv) freeButtonsDiv.style.display = '';
+          if (paidButtonsDiv) paidButtonsDiv.style.display = 'none';
+          // Set upgrade button mode based on trial state
+          if (trial && !trial.active) {
+            // Trial expired → "Upgrade to Pro"
+            upgradeBtn.textContent = 'Upgrade to Pro';
+            upgradeBtn.dataset.mode = 'upgrade';
+          } else {
+            // Never trialed → "Try Pro Features Free"
+            upgradeBtn.textContent = 'Try Pro Features Free';
+            upgradeBtn.dataset.mode = 'try';
+          }
+        }
       });
     }
   }
@@ -3670,9 +3705,20 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.openOptionsPage();
   });
 
-  // ─── Upgrade button ──────────────────────────────────────────────────────
-  upgradeBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'https://www.portility.ai/pricing' });
+  // ─── Upgrade / Try Pro button ────────────────────────────────────────────
+  upgradeBtn.addEventListener('click', function () {
+    // If trial expired or user is paid wanting to upgrade → go to pricing
+    if (upgradeBtn.dataset.mode === 'upgrade') {
+      chrome.tabs.create({ url: 'https://www.portility.ai/pricing' });
+      return;
+    }
+    // "Try Pro Features Free" → reveal paid buttons, hide free buttons
+    if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
+    if (paidButtonsDiv) paidButtonsDiv.style.display = '';
+    // Cache so subsequent popup opens show paid buttons
+    chrome.storage.local.set({ trialStatus: { active: true, timestamp: Date.now() } });
+    crumb('try_pro_clicked');
+    trackEvent('try_pro_clicked');
   });
 
   // ─── Port Me (free) — same handler as Port Me Pro ────────────────────────
