@@ -220,6 +220,7 @@ function trackUsageEvent(env, distinctId, params) {
       properties: {
         feature: params.feature,
         tier: params.tier,
+        tier_class: params.tier_class,
         used: params.used,
         limit: params.limit,
         $lib: 'portility-worker',
@@ -341,16 +342,29 @@ async function handleUse(request, env, corsHeaders) {
   var commitUrl = 'https://firestore.googleapis.com/v1/projects/' +
     env.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';
 
+  var tierClass = tier === 'free' ? 'free' : 'paid';
+
   var commitBody = {
-    writes: [{
-      transform: {
-        document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid,
-        fieldTransforms: [{
-          fieldPath: 'usage_count',
-          increment: { integerValue: '1' },
-        }],
+    writes: [
+      {
+        transform: {
+          document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid,
+          fieldTransforms: [
+            { fieldPath: 'usage_count', increment: { integerValue: '1' } },
+            { fieldPath: 'lifetime_total', increment: { integerValue: '1' } },
+          ],
+        },
       },
-    }],
+      {
+        transform: {
+          document: 'projects/' + env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/stats/global',
+          fieldTransforms: [
+            { fieldPath: 'total_ports', increment: { integerValue: '1' } },
+            { fieldPath: tierClass === 'free' ? 'total_free_ports' : 'total_paid_ports', increment: { integerValue: '1' } },
+          ],
+        },
+      },
+    ],
   };
 
   var commitResp = await fetch(commitUrl, {
@@ -373,8 +387,11 @@ async function handleUse(request, env, corsHeaders) {
 
   // If migrating, also write the usage_count baseline and reset_date
   if (needsMigration) {
-    var migrateFields = { usage_count: { integerValue: String(newUsed) } };
-    var migratePaths = ['usage_count'];
+    var migrateFields = {
+      usage_count: { integerValue: String(newUsed) },
+      lifetime_total: { integerValue: String(newUsed) },
+    };
+    var migratePaths = ['usage_count', 'lifetime_total'];
     if (tierConfig.monthly && !resetDate) {
       // Set a reset_date from billingAnchorDate if available, otherwise leave null
       var anchorTs = fields.billingAnchorDate?.timestampValue;
@@ -402,7 +419,7 @@ async function handleUse(request, env, corsHeaders) {
   }
 
   // Fire PostHog event
-  trackUsageEvent(env, claimedUid, { feature: feature, tier: tier, used: newUsed, limit: limit });
+  trackUsageEvent(env, claimedUid, { feature: feature, tier: tier, tier_class: tierClass, used: newUsed, limit: limit });
 
   return new Response(JSON.stringify({
     allowed: true,
@@ -410,6 +427,76 @@ async function handleUse(request, env, corsHeaders) {
     limit: limit,
     tier: tier,
     warning: warning,
+  }), {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+  });
+}
+
+// ─── POST /reset-usage — reset usage_count without touching lifetime_total ──
+async function handleResetUsage(request, env, corsHeaders) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders });
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+      status: 400, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var claimedUid = body.firebaseUid;
+  if (!claimedUid) {
+    return new Response(JSON.stringify({ error: 'Missing firebaseUid' }), {
+      status: 400, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var authHeader = request.headers.get('Authorization') || '';
+  var idToken = authHeader.replace(/^Bearer\s+/i, '');
+  if (!idToken) {
+    return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseIdToken(idToken, env.FIREBASE_API_KEY);
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid token: ' + e.message }), {
+      status: 401, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  if (verifiedUid !== claimedUid) {
+    return new Response(JSON.stringify({ error: 'UID mismatch' }), {
+      status: 403, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
+  var accessToken = await getFirebaseAccessToken(env);
+  var docUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/users/' + claimedUid;
+
+  // Reset usage_count to 0
+  await firestorePatchFields(accessToken, docUrl, {
+    usage_count: { integerValue: '0' },
+  }, ['usage_count']);
+
+  // Read back lifetime_total
+  var docResp = await fetch(docUrl, {
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+  });
+  var lifetimeTotal = 0;
+  if (docResp.ok) {
+    var doc = await docResp.json();
+    lifetimeTotal = parseInt(doc.fields?.lifetime_total?.integerValue || '0', 10);
+  }
+
+  return new Response(JSON.stringify({
+    success: true,
+    lifetime_total: lifetimeTotal,
   }), {
     headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
   });
@@ -638,6 +725,8 @@ export default {
         return await handleCompare(request, env, corsHeaders);
       } else if (path === '/use') {
         return await handleUse(request, env, corsHeaders);
+      } else if (path === '/reset-usage') {
+        return await handleResetUsage(request, env, corsHeaders);
       } else if (path === '/feedback') {
         return await handleFeedback(request, env, corsHeaders);
       } else if (path === '/trainer-chat') {

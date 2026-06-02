@@ -701,8 +701,30 @@
       font-size: 11px;
       color: #9ca3af;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 4px;
+    }
+    .so-step-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.2;
+    }
+    .so-step-detail {
+      display: block;
+      font-size: 9px;
+      font-weight: 400;
+      color: #9ca3af;
+      margin-top: 1px;
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .so-step.active .so-step-detail {
+      color: #6366f1;
+    }
+    .so-step.done .so-step-detail {
+      color: #16a34a;
     }
     .so-step-icon {
       display: inline-block;
@@ -711,6 +733,7 @@
       border-radius: 50%;
       background: #d1d5db;
       flex-shrink: 0;
+      margin-top: 2px;
     }
     .so-step.active {
       color: #374151;
@@ -958,9 +981,9 @@
     </svg>
 
     <div id="so-steps" class="so-steps">
-      <div class="so-step" data-step="1"><span class="so-step-icon"></span> Reading</div>
-      <div class="so-step" data-step="2"><span class="so-step-icon"></span> Analyzing</div>
-      <div class="so-step" data-step="3"><span class="so-step-icon"></span> Comparing</div>
+      <div class="so-step" data-step="1"><span class="so-step-icon"></span> <span class="so-step-text">Reading<span class="so-step-detail" id="so-detail-1"></span></span></div>
+      <div class="so-step" data-step="2"><span class="so-step-icon"></span> <span class="so-step-text">Analyzing<span class="so-step-detail" id="so-detail-2"></span></span></div>
+      <div class="so-step" data-step="3"><span class="so-step-icon"></span> <span class="so-step-text">Comparing<span class="so-step-detail" id="so-detail-3"></span></span></div>
     </div>
     <div id="so-score-lbl"></div>
     <div id="so-interp"></div>

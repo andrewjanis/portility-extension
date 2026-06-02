@@ -2947,7 +2947,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     secondOpinionBtn.disabled = true;
     showDialLoading();
-    updateSOStep(1);
+    updateSOStep(1, 'Detecting platform...');
     var _soStartTime = Date.now();
 
     try {
@@ -2963,6 +2963,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (/chatgpt\.com/i.test(tab.url)) platform = 'chatgpt';
       else if (/gemini\.google\.com/i.test(tab.url)) platform = 'gemini';
       else if (/claude\.ai/i.test(tab.url)) platform = 'claude';
+
+      var platformLabel = platform === 'chatgpt' ? 'ChatGPT' : platform === 'gemini' ? 'Gemini' : 'Claude';
+      setSODetail(1, 'Extracting from ' + platformLabel + '...');
 
       // Step 2: Extract conversation from the page
       var extractResponse = await new Promise(function (resolve, reject) {
@@ -2980,6 +2983,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (!extractResponse.text) throw new Error('No conversation text found on page.');
+      setSODetail(1, platformLabel + ' conversation read');
 
       // Read captured images from storage and filter out tiny ones
       var soImageData = await new Promise(function (resolve) {
@@ -2999,7 +3003,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Steps 3-5: Summarize and second-opinion in parallel
-      updateSOStep(2);
+      updateSOStep(2, 'Summarizing & getting 2nd opinion...');
       var soDistinctId = await getDistinctId();
 
       // Strip dataUrl from assets before sending to API
@@ -3069,7 +3073,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Step 6: POST to /compare
-      updateSOStep(3);
+      setSODetail(2, 'Responses received');
+      updateSOStep(3, 'Scoring agreement...');
 
       var compareResp = await fetch(proxyBase + '/compare', {
         method: 'POST',
@@ -3082,6 +3087,7 @@ document.addEventListener('DOMContentLoaded', () => {
       trackTokenUsage('compare', compareData._usage);
 
       // Step 7: Pass to results UI (Task 14)
+      setSODetail(3, 'Analysis complete');
       soNewBtn.style.display = 'none';
       showSecondOpinionResults({
         originalBrief: artifact,
@@ -3375,7 +3381,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   var _soSweepFrame = null;
 
-  function updateSOStep(stepNum) {
+  function updateSOStep(stepNum, detail) {
     var steps = document.querySelectorAll('#so-steps .so-step');
     steps.forEach(function (el) {
       var s = parseInt(el.getAttribute('data-step'), 10);
@@ -3383,12 +3389,22 @@ document.addEventListener('DOMContentLoaded', () => {
       if (s < stepNum) el.classList.add('done');
       else if (s === stepNum) el.classList.add('active');
     });
+    if (detail) setSODetail(stepNum, detail);
+  }
+
+  function setSODetail(stepNum, text) {
+    var el = document.getElementById('so-detail-' + stepNum);
+    if (el) el.textContent = text;
   }
 
   function resetSOSteps() {
     document.querySelectorAll('#so-steps .so-step').forEach(function (el) {
       el.classList.remove('active', 'done');
     });
+    for (var i = 1; i <= 3; i++) {
+      var d = document.getElementById('so-detail-' + i);
+      if (d) d.textContent = '';
+    }
   }
 
   // Map a needle degree to the zone color (same thresholds as soZoneColors)
