@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var accountSignedOut = document.getElementById('accountSignedOut');
   var accountEmail = document.getElementById('accountEmail');
 
-  // ─── DEV: Tier radio buttons ────────────────────────────────────────────
+  // ─── DEV: Tier radio buttons (HIDDEN by default — keep for testing) ─────
+  // To show: run document.getElementById('devTierSection').style.display='' in devtools.
   // Uses a separate storage key (devTierOverride) so it can never be
   // clobbered by the normal tier-refresh flow that writes to userTier.
   var devTierContainer = document.getElementById('devTierRadios');
