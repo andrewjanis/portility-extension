@@ -9,6 +9,11 @@
 
   function soSplitTitleBody(text) {
     if (!text) return { title: 'Point', summary: '' };
+    // Handle object format {title, text} passed directly
+    if (typeof text === 'object' && text.title) {
+      return { title: text.title, summary: text.text || '' };
+    }
+    if (typeof text !== 'string') return { title: 'Point', summary: String(text) };
     var body = text;
     var preambles = [
       /^both\s+(recognize|acknowledge|note|agree|identify|highlight|mention|discuss|address|cover|provide|include|present|focus|emphasize)\s+(that|the|on|how|a)?\s*:?\s*/i,
@@ -87,12 +92,27 @@
 
     // Build theme rows
     var allPoints = [];
-    (cmp.agreements || []).forEach(function (a) { allPoints.push({ text: a, type: 'agree' }); });
-    (cmp.divergences || []).forEach(function (dv) { allPoints.push({ text: dv, type: 'differ' }); });
+    (cmp.agreements || []).forEach(function (a) {
+      // Support both object {title, text} and legacy string format
+      if (typeof a === 'object' && a.title) {
+        allPoints.push({ text: a.text || '', title: a.title, type: 'agree' });
+      } else {
+        allPoints.push({ text: a, title: null, type: 'agree' });
+      }
+    });
+    (cmp.divergences || []).forEach(function (dv) {
+      if (typeof dv === 'object' && dv.title) {
+        allPoints.push({ text: dv.text || '', title: dv.title, type: 'differ' });
+      } else {
+        allPoints.push({ text: dv, title: null, type: 'differ' });
+      }
+    });
     var themes = allPoints.slice(0, 5);
 
     var rowsHtml = themes.map(function (item) {
-      var parts = soSplitTitleBody(item.text);
+      var parts = item.title
+        ? { title: item.title, summary: item.text }
+        : soSplitTitleBody(item.text);
       var q1 = soFindRelevantQuote(d.originalBrief, parts.title);
       var q2 = soFindRelevantQuote(d.secondOpinion, parts.title);
       var tagColor = item.type === 'agree' ? '#16a34a' : '#dc2626';

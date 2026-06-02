@@ -255,6 +255,89 @@
       cursor: pointer;
     }
 
+    .port-text-toggle {
+      display: none;
+      margin-top: 10px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .port-text-toggle-inner {
+      display: flex;
+      gap: 0;
+    }
+
+    .port-text-toggle label {
+      flex: 1;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      padding: 5px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+      user-select: none;
+    }
+
+    .port-text-toggle input[type="radio"] {
+      display: none;
+    }
+
+    .port-text-toggle input[type="radio"]:checked + label {
+      background: #fff;
+      color: #1f2937;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .include-profile-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .include-profile-checkbox-label {
+      font-size: 11px;
+      color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .include-profile-checkbox-label input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .profile-select {
+      flex: 1;
+      min-width: 0;
+      font-size: 11px;
+      font-family: 'Nunito', sans-serif;
+      padding: 3px 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #fff;
+      color: #374151;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .profile-select:focus {
+      border-color: #14b8a6;
+    }
+
+    .profile-select:disabled {
+      background: #f9fafb;
+      color: #9ca3af;
+      cursor: not-allowed;
+    }
+
     #screen2Status {
       font-size: 11px;
       color: #6b7280;
@@ -789,7 +872,7 @@
 
     <div id="paid-buttons" style="display:none;">
       <button id="proChatBtn" class="btn-primary"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat Pro</button>
-      <button id="portInstructionsBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port Me Pro</button>
+      <button id="portInstructionsBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port my Profile</button>
       <button id="secondOpinionBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="17" r=".5" fill="#0D9488" stroke="#0D9488"/></svg>Second Opinion</button>
     </div>
     <div id="status"></div>
@@ -927,6 +1010,30 @@
       Port my operating instructions with this thread
     </label>
 
+    <div id="portTextToggle" class="port-text-toggle">
+      <div class="port-text-toggle-inner">
+        <input type="radio" name="portTextMode" id="portSummaryRadio" value="summary" checked>
+        <label for="portSummaryRadio">Port Summary</label>
+        <input type="radio" name="portTextMode" id="portFullRadio" value="full">
+        <label for="portFullRadio">Port Full Text</label>
+      </div>
+    </div>
+
+    <div id="includeProfileLabel" class="include-profile-row" style="display:none;">
+      <label class="include-profile-checkbox-label">
+        <input type="checkbox" id="includeProfileCheckbox" checked>
+        Include My Profile
+      </label>
+      <select id="profileSelect" class="profile-select"></select>
+    </div>
+
+    <div id="includeImagesLabel" class="include-profile-row" style="display:none;">
+      <label class="include-profile-checkbox-label">
+        <input type="checkbox" id="includeImagesCheckbox" checked>
+        <span id="includeImagesText">Include images</span>
+      </label>
+    </div>
+
     <div id="screen2Status"></div>
   </div>
 
@@ -1004,6 +1111,7 @@
 
   <script src="utils.js"></script>
   <script src="config.js"></script>
+  <script src="remote-config.js"></script>
   <script src="encryption.js"></script>
   <script src="oauth.js"></script>
   <script src="firestore.js"></script>

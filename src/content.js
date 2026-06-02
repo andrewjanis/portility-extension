@@ -133,6 +133,210 @@
     return '';
   }
 
+  // ─── File attachment detection ──────────────────────────────────────────
+
+  /**
+   * Extract file content by clicking the file card to open Claude's preview,
+   * then scraping the content from the resulting DOM overlay.
+   * @param {Element} btnEl - The file card button element
+   * @param {string} filename - The filename for MIME type detection
+   * @returns {Promise<string|null>} data URL or null
+   */
+  function extractFileViaClick(btnEl, filename) {
+    return new Promise(function (resolve) {
+      // Snapshot existing overlays/modals so we can detect the new one
+      var existingOverlays = new Set(document.querySelectorAll('[role="dialog"], [data-radix-portal], [class*="modal"], [class*="overlay"], [class*="backdrop"]'));
+
+      btnEl.click();
+      console.log('[Portility] Clicked file card, waiting for preview...');
+
+      var attempts = 0;
+      var checkInterval = setInterval(function () {
+        attempts++;
+
+        // Look for new overlay/modal/dialog that appeared after clicking
+        var allOverlays = document.querySelectorAll('[role="dialog"], [data-radix-portal], [class*="modal"], [class*="overlay"], [class*="backdrop"]');
+        var newOverlay = null;
+        for (var o = 0; o < allOverlays.length; o++) {
+          if (!existingOverlays.has(allOverlays[o])) {
+            newOverlay = allOverlays[o];
+            break;
+          }
+        }
+
+        // Also check for file content viewers (pre, code blocks, iframes)
+        var contentEl = null;
+        if (newOverlay) {
+          // Look for content inside the new overlay
+          contentEl = newOverlay.querySelector('pre') || newOverlay.querySelector('code') ||
+                      newOverlay.querySelector('[class*="content"]') || newOverlay.querySelector('iframe');
+        }
+
+        // Also try any pre/code element that appeared after click
+        if (!contentEl && !newOverlay && attempts > 3) {
+          // Maybe content appeared inline, not in a modal
+          var allPres = document.querySelectorAll('pre, [class*="code-block"]');
+          // We'll just check the last/newest one
+          if (allPres.length > 0) contentEl = allPres[allPres.length - 1];
+        }
+
+        if (contentEl || (newOverlay && attempts >= 3)) {
+          clearInterval(checkInterval);
+          var textContent = '';
+
+          if (contentEl && contentEl.tagName === 'IFRAME') {
+            try { textContent = contentEl.contentDocument.body.textContent || ''; } catch (e) { /* cross-origin */ }
+          } else if (contentEl) {
+            textContent = contentEl.textContent || contentEl.innerText || '';
+          } else if (newOverlay) {
+            textContent = newOverlay.textContent || newOverlay.innerText || '';
+          }
+
+          // Close the preview
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+          setTimeout(function () {
+            // Try clicking close button if Escape didn't work
+            if (newOverlay && document.body.contains(newOverlay)) {
+              var closeBtn = newOverlay.querySelector('button[aria-label="Close"]') ||
+                             newOverlay.querySelector('button:first-child');
+              if (closeBtn) closeBtn.click();
+            }
+          }, 100);
+
+          if (textContent.length > 20) {
+            var mimeType = 'text/plain';
+            if (/\.html?$/i.test(filename)) mimeType = 'text/html';
+            else if (/\.css$/i.test(filename)) mimeType = 'text/css';
+            else if (/\.(js|ts|jsx|tsx)$/i.test(filename)) mimeType = 'application/javascript';
+            else if (/\.json$/i.test(filename)) mimeType = 'application/json';
+            else if (/\.md$/i.test(filename)) mimeType = 'text/markdown';
+            else if (/\.xml$/i.test(filename)) mimeType = 'application/xml';
+            else if (/\.csv$/i.test(filename)) mimeType = 'text/csv';
+            else if (/\.py$/i.test(filename)) mimeType = 'text/x-python';
+            var dataUrl = 'data:' + mimeType + ';base64,' + btoa(unescape(encodeURIComponent(textContent)));
+            console.log('[Portility] Extracted', textContent.length, 'chars from file preview');
+            resolve(dataUrl);
+          } else {
+            console.log('[Portility] Preview content too small:', textContent.length, 'chars');
+            resolve(null);
+          }
+          return;
+        }
+
+        if (attempts > 15) { // 3 seconds max
+          clearInterval(checkInterval);
+          // Close anything that might have opened
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+          console.log('[Portility] File preview did not appear after', attempts, 'checks');
+          resolve(null);
+        }
+      }, 200);
+    });
+  }
+
+  /**
+   * Scan the conversation scope for Claude-specific file attachments.
+   * Claude renders uploaded files as button cards inside a wrapper with
+   * data-testid="file-thumbnail". The button text contains the filename.
+   * These are NOT standard <a> links.
+   * @param {Element} scope - conversation container
+   * @param {Array} existingAssets - already-detected assets (to avoid duplicates)
+   * @returns {Promise<Array>} additional file assets with dataUrl populated
+   */
+  async function detectClaudeFileAttachments(scope, existingAssets) {
+    var newAssets = [];
+
+    // Claude uses data-testid="file-thumbnail" as an empty marker div
+    // that is a SIBLING of the actual <button> card inside a .relative wrapper.
+    var fileThumbnails = scope.querySelectorAll('[data-testid="file-thumbnail"]');
+    console.log('[Portility] Claude file scan: found', fileThumbnails.length, 'file-thumbnail element(s)');
+
+    for (var i = 0; i < fileThumbnails.length; i++) {
+      var marker = fileThumbnails[i];
+      // The button is a sibling inside the same parent (div.relative)
+      var card = marker.parentElement;
+      if (!card) continue;
+      var btn = card.querySelector('button') || card;
+
+      // Extract filename from the button card. The button has child divs:
+      // one with the filename, another with a file-type label (e.g. "HTML").
+      // Using btn.textContent concatenates them ("file.htmlHTML"), so we
+      // look at individual child elements first.
+      var filename = '';
+      // Try title/aria-label attribute first
+      var titleAttr = btn.getAttribute('title') || btn.getAttribute('aria-label') || '';
+      if (titleAttr && /\.\w{1,10}$/.test(titleAttr)) {
+        filename = titleAttr;
+      }
+      // Try first child div's text (usually just the filename)
+      if (!filename) {
+        var innerDivs = btn.querySelectorAll('div');
+        for (var cd = 0; cd < innerDivs.length; cd++) {
+          var divText = (innerDivs[cd].textContent || '').trim();
+          if (/\.\w{1,10}$/.test(divText) && divText.length < 200) {
+            filename = divText;
+            break;
+          }
+        }
+      }
+      // Fallback: parse full textContent carefully
+      if (!filename) {
+        var cardText = (btn.textContent || '').trim();
+        // Match "name.ext" stopping before a repeated extension or whitespace
+        var fnameMatch = cardText.match(/([^\s/\\]+\.\w{1,10})(?:\s|$)/);
+        filename = fnameMatch ? fnameMatch[1] : cardText.split('\n')[0].trim();
+      }
+      if (!filename) {
+        filename = 'file_' + (i + 1);
+      }
+      console.log('[Portility] Extracted filename:', filename);
+
+      // Check if already detected by generic extractAssets
+      var alreadyFound = existingAssets.some(function (a) {
+        return (a.filename && a.filename === filename) ||
+               (a.alt && a.alt === filename);
+      });
+      if (alreadyFound) continue;
+
+      // Skip image-type files (already handled by image detection)
+      if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(filename)) continue;
+
+      // Determine which turn this attachment belongs to
+      var turnRole = 'Human';
+      var closestAi = card.closest('[class*="' + AI_CLASS_FRAGMENT + '"]');
+      if (closestAi) turnRole = 'Assistant';
+
+      var downloadUrl = null;
+      var dataUrl = null;
+
+      // Strategy 1: Check for <a> links inside or near the card
+      var linkEl = card.querySelector('a[href]');
+      if (!linkEl && card.parentElement) {
+        linkEl = card.parentElement.querySelector('a[href]');
+      }
+      if (linkEl) downloadUrl = linkEl.href;
+
+      // Strategy 2: Click the file card to open preview and extract content
+      if (!dataUrl) {
+        dataUrl = await extractFileViaClick(btn, filename);
+      }
+
+      newAssets.push({
+        type: 'file',
+        url: downloadUrl,
+        alt: filename,
+        thumbnailUrl: null,
+        filename: filename,
+        turnIndex: -1,
+        role: turnRole,
+        dataUrl: dataUrl,
+      });
+      console.log('[Portility] Detected Claude file attachment:', filename, downloadUrl ? '(has URL)' : dataUrl ? '(content extracted)' : '(metadata only)');
+    }
+
+    return newAssets;
+  }
+
   // ─── Turn finders ─────────────────────────────────────────────────────────
   function findHumanTurns(scope) {
     for (const sel of HUMAN_SELECTORS) {
@@ -350,14 +554,29 @@
             }
           }
 
+          // Claude-specific: detect uploaded file attachments (rendered as cards, not links)
+          var claudeFiles = await detectClaudeFileAttachments(scope, allAssets);
+          if (claudeFiles.length > 0) {
+            console.log('[Portility] Detected', claudeFiles.length, 'Claude file attachment(s)');
+            allAssets = allAssets.concat(claudeFiles);
+          }
+
           await window.PortilityShared.captureImageData(allAssets);
+
+          var capturedCount = allAssets.filter(function (a) { return !!a.dataUrl; }).length;
+          var responseAssets = allAssets.map(function (a) {
+            var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, turnIndex: a.turnIndex, role: a.role };
+            if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:') && !a.thumbnailUrl.startsWith('blob:')) copy.thumbnailUrl = a.thumbnailUrl;
+            return copy;
+          });
 
           var formatted = formatConversation(messages);
           sendResponse({
             success: true,
             messageCount: messages.length,
             text: formatted,
-            assets: allAssets,
+            assets: responseAssets,
+            capturedImageCount: capturedCount,
           });
         } catch (err) {
           sendResponse({ success: false, error: err.message || String(err) });
@@ -451,6 +670,7 @@
           chrome.storage.local.get('portility_pending_images', function (imgData) {
             var images = imgData.portility_pending_images;
             var hasImages = images && images.length > 0;
+            console.log('[Portility] Claude auto-paste: images in storage =', hasImages ? images.length : 0);
 
             if (hasImages && window.PortilityShared && window.PortilityShared.pasteImages) {
               // Try clicking attach button to ensure file input is in DOM

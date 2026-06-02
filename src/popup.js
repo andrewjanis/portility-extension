@@ -2074,7 +2074,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Full-text mode: show captured images for selection (no AI reasons)
           if (pmcTextMode !== 'summary' && allCapturedImages.length > 0) {
-            setScreen2Status('Select images to include\u2026');
+            setScreen2Status('Select files to include\u2026');
             var fullTextSelected = await showImageSelection(allCapturedImages, null);
             images = fullTextSelected.map(function(i) { return allCapturedImages[i]; });
           }
@@ -2175,8 +2175,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Summary mode: show captured images for selection, enriched with AI reasons
           if (capturedImageCount > 0 && allCapturedImages && allCapturedImages.length > 0) {
-            var imageAssets = mergedAssets.filter(function(a) { return a.type === 'image'; });
-            setScreen2Status('Select images to include\u2026');
+            var imageAssets = mergedAssets.filter(function(a) { return a.type === 'image' || a.type === 'file'; });
+            setScreen2Status('Select files to include\u2026');
             var summarySelected = await showImageSelection(allCapturedImages, imageAssets);
             images = summarySelected.map(function(i) { return allCapturedImages[i]; });
           }
@@ -2220,7 +2220,7 @@ document.addEventListener('DOMContentLoaded', () => {
           chrome.storage.local.remove('portility_captured_images');
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
           var statusMsg = images.length > 0
-            ? 'Brief + ' + images.length + ' image(s) porting!'
+            ? 'Brief + ' + images.length + ' file(s) porting!'
             : 'Conversation copied \u2014 paste it in the new tab!';
           setScreen2Status(statusMsg);
           crumb('pmc_pro_ported', { dest: destination, textMode: pmcTextMode });
@@ -2268,7 +2268,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // For AI destinations: text brief + auto-paste images via content script
           var clipContent = buildDownloadContent(_proData, false);
           var selectedImages = (_proData.assets || []).filter(function (a) {
-            return a.selected && a.type === 'image' && a.dataUrl;
+            return a.selected && (a.type === 'image' || a.type === 'file') && a.dataUrl;
           });
 
           await writeClipboard(clipContent);
@@ -2279,7 +2279,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // Store image data for content script to paste as attachments
           if (selectedImages.length > 0) {
             storagePayload.portility_pending_images = selectedImages.map(function (a) {
-              return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg' };
+              return { dataUrl: a.dataUrl, filename: a.filename || (a.type === 'file' ? 'file.bin' : 'image.jpg'), type: a.type || 'image' };
             });
           }
           console.log('[Pro] Storing for auto-paste:', {
@@ -2301,7 +2301,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           chrome.tabs.create({ url: DESTINATION_URLS[destination] });
           statusMsg = selectedImages.length > 0
-            ? 'Brief + ' + selectedImages.length + ' image(s) porting!'
+            ? 'Brief + ' + selectedImages.length + ' file(s) porting!'
             : 'Brief copied \u2014 paste it in the new tab!';
           setScreen2Status(statusMsg);
           crumb('pro_brief_ported', { dest: destination });
@@ -2509,9 +2509,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function showImageSelection(capturedImages, aiAssets) {
     proAssetTableBody.innerHTML = '';
 
-    // Filter out tiny images (favicons, logos, tiny thumbnails)
+    // Filter out tiny images (favicons, logos, tiny thumbnails).
+    // File-type assets skip the size filter — any non-empty dataUrl is valid.
     var realImages = capturedImages.filter(function(ci) {
-      return ci.dataUrl && ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
+      if (!ci.dataUrl) return false;
+      if (ci.type === 'file') return true;
+      return ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
     });
 
     if (realImages.length === 0) return Promise.resolve([]);
@@ -2520,7 +2523,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // return indices into the original capturedImages array
     var originalIndices = [];
     for (var oi = 0; oi < capturedImages.length; oi++) {
-      if (capturedImages[oi].dataUrl && capturedImages[oi].dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
+      var ci = capturedImages[oi];
+      if (!ci.dataUrl) continue;
+      if (ci.type === 'file' || ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
         originalIndices.push(oi);
       }
     }
@@ -2566,24 +2571,34 @@ document.addEventListener('DOMContentLoaded', () => {
       tdCheck.appendChild(cb);
       tr.appendChild(tdCheck);
 
-      // Asset description cell with thumbnail
+      // Asset description cell with thumbnail or file icon
       var tdAsset = document.createElement('td');
-      if (ci.dataUrl) {
+      var isFile = ci.type === 'file';
+      if (isFile) {
+        var fileIcon = document.createElement('span');
+        fileIcon.className = 'pro-asset-thumb pro-asset-file-icon';
+        fileIcon.textContent = '\uD83D\uDCC4';
+        tdAsset.appendChild(fileIcon);
+        tdAsset.appendChild(document.createTextNode(' '));
+      } else if (ci.dataUrl) {
         var img = document.createElement('img');
         img.src = ci.dataUrl;
         img.className = 'pro-asset-thumb';
         tdAsset.appendChild(img);
         tdAsset.appendChild(document.createTextNode(' '));
       }
-      var label = (aiMatch && aiMatch.description) || ci.alt || ci.filename || 'Image ' + (i + 1);
+      var label = isFile
+        ? (ci.filename || (aiMatch && aiMatch.description) || ci.alt || 'File ' + (i + 1))
+        : ((aiMatch && aiMatch.description) || ci.alt || ci.filename || 'Image ' + (i + 1));
       tdAsset.appendChild(document.createTextNode(label));
       tr.appendChild(tdAsset);
 
       // Type badge cell
       var tdType = document.createElement('td');
       var badge = document.createElement('span');
-      badge.className = 'pro-asset-type image';
-      badge.textContent = 'image';
+      var fileExt = isFile && ci.filename ? (ci.filename.match(/\.([^.]+)$/) || [])[1] : null;
+      badge.className = 'pro-asset-type ' + (isFile ? 'file' : 'image');
+      badge.textContent = isFile ? (fileExt || 'file') : 'image';
       tdType.appendChild(badge);
       tr.appendChild(tdType);
 

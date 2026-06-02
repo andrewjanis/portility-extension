@@ -11,13 +11,15 @@
 var USAGE_TIERS = {
   free:  { limit: 10, monthly: false, label: 'Free' },
   paid:  { limit: 50, monthly: true, label: 'Pro' },
-  paid2: { limit: 150, monthly: true, label: 'Pro Plus' },
+  paid2: { limit: 150, monthly: true, label: 'Premium' },
+  paid3: { limit: Infinity, monthly: true, label: 'Unlimited' },
 };
 
 var UPGRADE_URLS = {
   free:  'https://www.portility.ai/pricing',
   paid:  'https://www.portility.ai/pricing',
-  paid2: null,
+  paid2: 'https://www.portility.ai/pricing',
+  paid3: null,
 };
 
 var USAGE_PROJECT_ID = 'portility';
@@ -34,16 +36,20 @@ async function useFeature(idToken, firebaseUid, feature) {
   var proxyBase = (typeof PROXY_URL !== 'undefined' && PROXY_URL !== 'YOUR_WORKER_URL') ? PROXY_URL : '';
   if (!proxyBase) throw new Error('Worker URL not configured.');
 
+  // Include dev tier override if active so the server respects it
+  var payload = { firebaseUid: firebaseUid, feature: feature };
+  var override = await new Promise(function (resolve) {
+    chrome.storage.local.get('devTierOverride', function (r) { resolve(r.devTierOverride || null); });
+  });
+  if (override) payload.tierOverride = override;
+
   var resp = await fetch(proxyBase + '/use', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ' + idToken,
     },
-    body: JSON.stringify({
-      firebaseUid: firebaseUid,
-      feature: feature,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (resp.status === 401 || resp.status === 403) {

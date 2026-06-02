@@ -114,6 +114,14 @@ body.pro-review-active #proReview {
   background: #f3f4f6;
 }
 
+.pro-asset-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  vertical-align: middle;
+}
+
 .pro-asset-type {
   display: inline-block;
   font-size: 9px;

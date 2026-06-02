@@ -211,14 +211,24 @@
     function addFileLink(link) {
       var href = link.href || '';
       if (!href || seenHrefs[href]) return;
-      if (FILE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(href)) {
+      var linkText = (link.textContent || '').trim();
+      var hasDownloadAttr = link.hasAttribute('download');
+      var textMatchesFile = FILE_EXTENSIONS.test(linkText) || IMAGE_EXTENSIONS.test(linkText);
+      var urlMatchesFile = FILE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(href);
+
+      if (urlMatchesFile || hasDownloadAttr || textMatchesFile) {
         seenHrefs[href] = true;
+        var isImage = IMAGE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(linkText);
+        var fname = extractFilenameFromUrl(href)
+          || (textMatchesFile ? linkText : null)
+          || (hasDownloadAttr ? (link.getAttribute('download') || null) : null)
+          || ('file_' + turnIndex + '_' + assets.length);
         assets.push({
-          type: IMAGE_EXTENSIONS.test(href) ? 'image' : 'file',
+          type: isImage ? 'image' : 'file',
           url: href,
-          alt: link.textContent.trim() || '',
-          thumbnailUrl: IMAGE_EXTENSIONS.test(href) ? href : null,
-          filename: extractFilenameFromUrl(href) || ('file_' + turnIndex + '_' + assets.length),
+          alt: linkText || '',
+          thumbnailUrl: isImage ? href : null,
+          filename: fname,
           turnIndex: turnIndex,
           role: role,
         });
@@ -261,7 +271,7 @@
 
   // ─── Image capture ──────────────────────────────────────────────────────
 
-  var MAX_CAPTURE_IMAGES = 10;
+  var MAX_CAPTURE_ASSETS = 10;
   var CAPTURE_TIMEOUT_MS = 8000;
   var CAPTURE_MAX_DIM = 1024;
   var CAPTURE_MAX_KB = 500;
@@ -312,6 +322,30 @@
         resolve(null);
       }
     });
+  }
+
+  /**
+   * Fetch a file as data URL from the content script (has same-origin cookies).
+   * Falls back to fetchViaBackground if same-origin fetch fails.
+   */
+  function fetchWithCookies(src) {
+    return fetch(src, { credentials: 'include' })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.blob();
+      })
+      .then(function (blob) {
+        return new Promise(function (resolve) {
+          var reader = new FileReader();
+          reader.onload = function () { resolve(reader.result); };
+          reader.onerror = function () { resolve(null); };
+          reader.readAsDataURL(blob);
+        });
+      })
+      .catch(function () {
+        console.log('[Portility] Same-origin fetch failed for', src.substring(0, 80), '— trying background');
+        return fetchViaBackground(src);
+      });
   }
 
   /**
@@ -389,42 +423,72 @@
   }
 
   /**
-   * Capture base64 data for all image assets (in parallel, capped).
+   * Capture base64 data for all image and file assets (in parallel, capped).
    * Mutates each asset by adding a `dataUrl` property.
    * @param {Array} assets
    * @returns {Promise<void>}
    */
   async function captureImageData(assets) {
-    var imageAssets = assets.filter(function (a) { return a.type === 'image' && a.url; });
-    var toCapture = imageAssets.slice(0, MAX_CAPTURE_IMAGES);
+    // Assets that already have dataUrl (e.g. from platform-specific detection) don't need fetching
+    var alreadyCaptured = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.dataUrl; });
+    var needsCapture = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.url && !a.dataUrl; });
+    var toCapture = needsCapture.slice(0, MAX_CAPTURE_ASSETS);
 
     await Promise.allSettled(
       toCapture.map(function (asset) {
+        if (asset.type === 'file') {
+          // Files: fetch with cookies first (authenticated URLs), fallback to background
+          return fetchWithCookies(asset.url).then(function (dataUrl) {
+            if (dataUrl) asset.dataUrl = dataUrl;
+          });
+        }
+        // Images: use canvas-based capture with compression
         return captureImageDataUrl(asset.url).then(function (dataUrl) {
           if (dataUrl) asset.dataUrl = dataUrl;
         });
       })
     );
 
-    var capturedAssets = toCapture.filter(function (a) { return !!a.dataUrl; });
-    console.log('[Portility] Image capture: ' + capturedAssets.length + '/' + toCapture.length + ' succeeded' +
-      (imageAssets.length > MAX_CAPTURE_IMAGES ? ' (' + (imageAssets.length - MAX_CAPTURE_IMAGES) + ' skipped, cap=' + MAX_CAPTURE_IMAGES + ')' : ''));
+    var newlyCaptured = toCapture.filter(function (a) { return !!a.dataUrl; });
 
-    // Store captured images directly in chrome.storage.local
+    // Compress pre-captured images that are too large (e.g. from API downloads)
+    var maxDataUrlLen = CAPTURE_MAX_KB * 1024 * 1.37; // base64 overhead
+    var largeImages = alreadyCaptured.filter(function (a) {
+      return a.type === 'image' && a.dataUrl && a.dataUrl.length > maxDataUrlLen;
+    });
+    if (largeImages.length > 0) {
+      console.log('[Portility] Compressing', largeImages.length, 'oversized pre-captured image(s)');
+      await Promise.allSettled(largeImages.map(function (asset) {
+        return compressDataUrl(asset.dataUrl).then(function (compressed) {
+          if (compressed) {
+            console.log('[Portility] Compressed image from', Math.round(asset.dataUrl.length / 1024), 'KB to', Math.round(compressed.length / 1024), 'KB');
+            asset.dataUrl = compressed;
+          }
+        });
+      }));
+    }
+
+    var totalCaptured = alreadyCaptured.length + newlyCaptured.length;
+    console.log('[Portility] Asset capture: ' + newlyCaptured.length + '/' + toCapture.length + ' fetched' +
+      (alreadyCaptured.length > 0 ? ', ' + alreadyCaptured.length + ' pre-captured' : '') +
+      (needsCapture.length > MAX_CAPTURE_ASSETS ? ' (' + (needsCapture.length - MAX_CAPTURE_ASSETS) + ' skipped, cap=' + MAX_CAPTURE_ASSETS + ')' : ''));
+
+    // Store captured assets directly in chrome.storage.local
     // (avoids sendResponse message size limits)
-    if (capturedAssets.length > 0) {
-      var imagePayload = capturedAssets.map(function (a) {
-        return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg', url: a.url || null, alt: a.alt || null };
+    var allCapturedAssets = alreadyCaptured.concat(newlyCaptured);
+    if (allCapturedAssets.length > 0) {
+      var assetPayload = allCapturedAssets.map(function (a) {
+        return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg', url: a.url || null, alt: a.alt || null, type: a.type || 'image' };
       });
       await new Promise(function (resolve) {
-        chrome.storage.local.set({ portility_captured_images: imagePayload }, function () {
+        chrome.storage.local.set({ portility_captured_images: assetPayload }, function () {
           if (chrome.runtime.lastError) {
-            console.warn('[Portility] Failed to store captured images:', chrome.runtime.lastError.message);
+            console.warn('[Portility] Failed to store captured assets:', chrome.runtime.lastError.message);
           }
           resolve();
         });
       });
-      console.log('[Portility] Stored', imagePayload.length, 'captured images in chrome.storage.local');
+      console.log('[Portility] Stored', assetPayload.length, 'captured assets in chrome.storage.local');
     } else {
       chrome.storage.local.remove('portility_captured_images');
     }
@@ -445,7 +509,14 @@
       var byteStr = atob(parts[1]);
       var bytes = new Uint8Array(byteStr.length);
       for (var k = 0; k < byteStr.length; k++) bytes[k] = byteStr.charCodeAt(k);
-      var fname = (img.filename || ('image_' + (i + 1) + '.jpg')).replace(/\.[^.]+$/, '.jpg');
+      var fname;
+      if (mime.startsWith('image/')) {
+        // Images: force .jpg extension (canvas compression outputs JPEG)
+        fname = (img.filename || ('image_' + (i + 1) + '.jpg')).replace(/\.[^.]+$/, '.jpg');
+      } else {
+        // Non-image files: preserve original filename and extension
+        fname = img.filename || ('file_' + (i + 1) + '.bin');
+      }
       files.push(new File([bytes], fname, { type: mime }));
     }
     return files;
@@ -457,10 +528,12 @@
   function findFileInput() {
     // Search in regular DOM
     var inputs = document.querySelectorAll('input[type="file"]');
+    // Any file input works — prefer unrestricted or broad-accept inputs first
     for (var i = 0; i < inputs.length; i++) {
       var accept = inputs[i].getAttribute('accept') || '';
-      if (!accept || accept.indexOf('image') !== -1 || accept === '*/*') return inputs[i];
+      if (!accept || accept === '*/*') return inputs[i];
     }
+    // Fallback: use the first file input regardless of accept restriction
     if (inputs.length > 0) return inputs[0];
 
     // Search inside shadow DOMs (one level deep)
@@ -490,7 +563,7 @@
 
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
     fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-    console.log('[Portility] Uploaded ' + files.length + ' image(s) via file input');
+    console.log('[Portility] Uploaded ' + files.length + ' file(s) via file input');
     return true;
   }
 
@@ -532,7 +605,14 @@
    */
   function tryDragDrop(inputEl, files) {
     try {
-      var targets = [inputEl, document.body];
+      // Build list of potential drop targets (editor, form, main area, body)
+      var targets = [inputEl];
+      var form = inputEl.closest ? inputEl.closest('form') : null;
+      if (form) targets.push(form);
+      var main = document.querySelector('main');
+      if (main) targets.push(main);
+      targets.push(document.body);
+
       for (var t = 0; t < targets.length; t++) {
         var target = targets[t];
         var dt = new DataTransfer();
@@ -543,7 +623,7 @@
         var dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
         var dropHandled = !target.dispatchEvent(dropEvt);
         if (dropHandled) {
-          console.log('[Portility] Drop handled on', target === inputEl ? 'input' : 'body');
+          console.log('[Portility] Drop handled on', target.tagName || 'unknown');
           return true;
         }
       }
@@ -563,17 +643,36 @@
    * @param {function(boolean):void} callback
    */
   function pasteImages(inputEl, images, callback) {
-    console.log('[Portility] pasteImages called with', images.length, 'images');
+    console.log('[Portility] pasteImages called with', images.length, 'file(s)');
     try {
       var files = dataUrlsToFiles(images);
       console.log('[Portility] Converted to', files.length, 'File objects');
-      if (files.length === 0) { console.warn('[Portility] No files created from images'); callback(false); return; }
+      if (files.length === 0) { console.warn('[Portility] No files created from data'); callback(false); return; }
 
-      // Try strategies in order of reliability
+      // Check if any files are non-image (paste events falsely report success for non-images on some platforms)
+      var hasNonImage = false;
+      for (var i = 0; i < files.length; i++) {
+        if (!files[i].type.startsWith('image/')) { hasNonImage = true; break; }
+      }
+
+      // Try file input first (most reliable for all file types)
       if (tryFileInput(files)) { callback(true); return; }
-      if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
-      if (tryDragDrop(inputEl, files)) { callback(true); return; }
-      console.warn('[Portility] All image upload strategies failed');
+
+      // ChatGPT calls preventDefault on paste for ALL file types but only processes images.
+      // On ChatGPT, prefer drag-drop for non-image files. Other platforms (Gemini) handle
+      // non-image paste correctly, so keep paste-first for them.
+      var isChatGPT = /chatgpt\.com|chat\.openai\.com/i.test(location.hostname);
+
+      if (hasNonImage && isChatGPT) {
+        console.log('[Portility] Non-image file on ChatGPT, trying drag-drop before paste');
+        if (tryDragDrop(inputEl, files)) { callback(true); return; }
+        if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
+      } else {
+        if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
+        if (tryDragDrop(inputEl, files)) { callback(true); return; }
+      }
+
+      console.warn('[Portility] All file upload strategies failed');
       callback(false);
     } catch (err) {
       console.warn('[Portility] pasteImages failed:', err.message || err);
@@ -591,5 +690,6 @@
     extractAssets: extractAssets,
     captureImageData: captureImageData,
     pasteImages: pasteImages,
+    fetchWithCookies: fetchWithCookies,
   };
 })();

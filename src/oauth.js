@@ -3,6 +3,8 @@
  * Portility — Google OAuth via chrome.identity.launchWebAuthFlow.
  *
  * Requests a Google ID token directly and exchanges it for a Firebase ID token.
+ * Uses silent re-auth (prompt=none + login_hint) when possible to avoid
+ * showing the account picker on every token refresh.
  */
 
 'use strict';
@@ -20,24 +22,41 @@ function generateNonce() {
 }
 
 /**
- * Launch Google OAuth flow and return both access_token and id_token.
- * @returns {Promise<{accessToken: string, idToken: string}>}
+ * Build the Google OAuth URL.
+ * @param {object} opts
+ * @param {string} opts.prompt - 'none' for silent, 'select_account' for interactive
+ * @param {string} [opts.loginHint] - email to pre-select the account
+ * @returns {string}
  */
-async function launchGoogleAuthFlow() {
+function buildAuthUrl(opts) {
   var redirectUrl = chrome.identity.getRedirectURL();
   var nonce = generateNonce();
 
-  var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' +
+  var url = 'https://accounts.google.com/o/oauth2/v2/auth' +
     '?client_id=' + encodeURIComponent(OAUTH_CLIENT_ID) +
     '&response_type=token%20id_token' +
     '&redirect_uri=' + encodeURIComponent(redirectUrl) +
     '&scope=' + encodeURIComponent('openid profile email') +
     '&nonce=' + nonce +
-    '&prompt=select_account';
+    '&prompt=' + opts.prompt;
 
+  if (opts.loginHint) {
+    url += '&login_hint=' + encodeURIComponent(opts.loginHint);
+  }
+
+  return url;
+}
+
+/**
+ * Run a launchWebAuthFlow and extract tokens from the redirect URL.
+ * @param {string} authUrl
+ * @param {boolean} interactive
+ * @returns {Promise<{accessToken: string, idToken: string}>}
+ */
+function runAuthFlow(authUrl, interactive) {
   return new Promise(function (resolve, reject) {
     chrome.identity.launchWebAuthFlow(
-      { url: authUrl, interactive: true },
+      { url: authUrl, interactive: interactive },
       function (responseUrl) {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -63,6 +82,31 @@ async function launchGoogleAuthFlow() {
       }
     );
   });
+}
+
+/**
+ * Launch Google OAuth flow. Tries silent re-auth first if we have a
+ * cached login_hint (email). Falls back to interactive account picker.
+ * @returns {Promise<{accessToken: string, idToken: string}>}
+ */
+async function launchGoogleAuthFlow() {
+  // Try silent re-auth if we have the user's email from a previous session
+  var cached = await new Promise(function (resolve) {
+    chrome.storage.local.get('google_login_hint', function (data) { resolve(data); });
+  });
+
+  if (cached.google_login_hint) {
+    try {
+      var silentUrl = buildAuthUrl({ prompt: 'none', loginHint: cached.google_login_hint });
+      return await runAuthFlow(silentUrl, false);
+    } catch (_e) {
+      // Silent auth failed — fall through to interactive
+    }
+  }
+
+  // Interactive fallback — show account picker
+  var interactiveUrl = buildAuthUrl({ prompt: 'select_account' });
+  return runAuthFlow(interactiveUrl, true);
 }
 
 /**
@@ -147,12 +191,12 @@ async function ensureAuthenticated() {
     };
   }
 
-  // Launch fresh Google auth flow
+  // Token expired or missing — launchGoogleAuthFlow tries silent first
   var googleTokens = await launchGoogleAuthFlow();
   var userInfo = await getGoogleUserInfo(googleTokens.accessToken);
   var firebaseAuth = await exchangeForFirebaseToken(googleTokens.idToken);
 
-  // Cache everything
+  // Cache everything, including login_hint for future silent re-auth
   var expiry = now + 55 * 60 * 1000;
   await new Promise(function (resolve) {
     chrome.storage.local.set({
@@ -161,6 +205,7 @@ async function ensureAuthenticated() {
       firebase_id_token: firebaseAuth.firebaseIdToken,
       firebase_uid: firebaseAuth.firebaseUid,
       firebase_token_expiry: expiry,
+      google_login_hint: userInfo.email,
     }, resolve);
   });
 
