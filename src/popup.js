@@ -372,28 +372,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function showUsageWarning(warning) {
-    warning = applyDevTierToResult(warning);
-    // No warnings for unlimited tier
-    if (warning.limit === Infinity || warning.limit === null) return;
-    var banner = document.getElementById('usageWarningBanner');
-    if (!banner) return;
-    banner.textContent = warning.message || ('You\'ve used ' + warning.used + ' of ' + warning.limit + ' uses.');
-    banner.style.display = 'block';
-    banner.onclick = function () { banner.style.display = 'none'; };
-    setTimeout(function () { banner.style.display = 'none'; }, 8000);
-  }
-
-  function showTrialStarted() {
-    var banner = document.getElementById('usageWarningBanner');
-    if (!banner) return;
-    banner.textContent = 'Welcome! Your 7-day free trial has started (50 uses).';
-    banner.style.display = 'block';
-    banner.onclick = function () { banner.style.display = 'none'; };
-    setTimeout(function () { banner.style.display = 'none'; }, 8000);
-    // Cache trial status so applyTierUI can show paid buttons
-    chrome.storage.local.set({ trialStatus: { active: true, timestamp: Date.now() } });
-  }
+  // Usage warnings/trial banners — kept as no-ops; limits not surfaced to users
+  function showUsageWarning() {}
+  function showTrialStarted() {}
 
   // ── Port My Chat Pro elements ──────────────────────────────────────────
   const proChatBtn = document.getElementById('proChatBtn');
@@ -484,39 +465,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyTierUI() {
-    var isPaid = _userTier !== 'free';
     console.log('[Popup] User tier:', _userTier);
 
-    if (isPaid) {
-      // Subscriber: show paid buttons only
+    if (_userTier === 'paid' || _userTier === 'paid2' || _userTier === 'paid3') {
+      // State 3/4: Pro or Premium — show paid buttons, hide free + upgrade
       if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
       if (paidButtonsDiv) paidButtonsDiv.style.display = '';
     } else {
-      // Free user: check for active trial
-      chrome.storage.local.get('trialStatus', function (data) {
-        var trial = data.trialStatus;
-        var trialActive = trial && trial.active && (Date.now() - trial.timestamp < 7 * 24 * 60 * 60 * 1000);
-
-        if (trialActive) {
-          // Active trial: show paid buttons
-          if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
-          if (paidButtonsDiv) paidButtonsDiv.style.display = '';
-        } else {
-          // No trial or expired: show free buttons + CTA
-          if (freeButtonsDiv) freeButtonsDiv.style.display = '';
-          if (paidButtonsDiv) paidButtonsDiv.style.display = 'none';
-          // Set upgrade button mode based on trial state
-          if (trial && !trial.active) {
-            // Trial expired → "Upgrade to Pro"
-            upgradeBtn.textContent = 'Upgrade to Pro';
-            upgradeBtn.dataset.mode = 'upgrade';
-          } else {
-            // Never trialed → "Try Pro Features Free"
-            upgradeBtn.textContent = 'Try Pro Features Free';
-            upgradeBtn.dataset.mode = 'try';
-          }
-        }
-      });
+      // State 2: Free — show free buttons + Upgrade, hide paid buttons
+      if (freeButtonsDiv) freeButtonsDiv.style.display = '';
+      if (paidButtonsDiv) paidButtonsDiv.style.display = 'none';
+      upgradeBtn.textContent = 'Upgrade';
+      upgradeBtn.dataset.mode = 'upgrade';
     }
   }
 
@@ -1298,10 +1258,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Handle + New Profile button state
-    if (profiles.length >= MAX_PROFILES) {
+    var maxProfiles = getMaxProfiles(_userTier);
+    if (profiles.length >= maxProfiles) {
       profileNewBtn.disabled = true;
       profileNewBlocked.style.display = 'block';
-      profileNewBlocked.textContent = 'Maximum ' + MAX_PROFILES + ' profiles reached.';
+      profileNewBlocked.textContent = maxProfiles === Infinity ? 'Maximum profiles reached.' : 'Maximum ' + maxProfiles + ' profiles reached.';
     } else {
       profileNewBtn.disabled = false;
       profileNewBlocked.style.display = 'none';
@@ -1812,7 +1773,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // "+ New Profile" button in picker
   profileNewBtn.addEventListener('click', function () {
-    if (_cachedProfiles && _cachedProfiles.length >= MAX_PROFILES) {
+    if (_cachedProfiles && _cachedProfiles.length >= getMaxProfiles(_userTier)) {
       trackEvent('portme_pro_new_profile_blocked', { profileCount: _cachedProfiles.length });
       return;
     }
@@ -2983,7 +2944,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loginBtn.addEventListener('click', async function () {
     loginBtn.disabled = true;
-    loginBtn.textContent = 'Signing in\u2026';
+    loginBtn.textContent = 'Creating account\u2026';
     try {
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
@@ -2992,7 +2953,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loginBtn.style.display = 'none';
       crumb('login_btn_success');
     } catch (e) {
-      loginBtn.textContent = 'Sign in';
+      loginBtn.textContent = 'Create a Free Account';
       setStatus('Sign in failed. Try again.', true);
       crumb('login_btn_failed', { error: (e.message || '').substring(0, 200) });
     } finally {
@@ -3726,20 +3687,9 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.openOptionsPage();
   });
 
-  // ─── Upgrade / Try Pro button ────────────────────────────────────────────
+  // ─── Upgrade button — always navigates to pricing ───────────────────────
   upgradeBtn.addEventListener('click', function () {
-    // If trial expired or user is paid wanting to upgrade → go to pricing
-    if (upgradeBtn.dataset.mode === 'upgrade') {
-      chrome.tabs.create({ url: 'https://www.portility.ai/pricing' });
-      return;
-    }
-    // "Try Pro Features Free" → reveal paid buttons, hide free buttons
-    if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
-    if (paidButtonsDiv) paidButtonsDiv.style.display = '';
-    // Cache so subsequent popup opens show paid buttons
-    chrome.storage.local.set({ trialStatus: { active: true, timestamp: Date.now() } });
-    crumb('try_pro_clicked');
-    trackEvent('try_pro_clicked');
+    chrome.tabs.create({ url: 'https://www.portility.ai/pricing' });
   });
 
   // ─── Port Me (free) — same handler as Port Me Pro ────────────────────────

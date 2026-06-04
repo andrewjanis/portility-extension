@@ -9,8 +9,14 @@
 
 'use strict';
 
-var MAX_PROFILES = 5;
+var MAX_PROFILES = 5; // Pro default
+var MAX_PROFILES_PREMIUM = Infinity;
 var MAX_PROFILE_NAME_LENGTH = 30;
+
+function getMaxProfiles(tier) {
+  if (tier === 'paid2' || tier === 'paid3') return MAX_PROFILES_PREMIUM;
+  return MAX_PROFILES; // Pro (paid) and fallback
+}
 
 // ─── Colour swatches ─────────────────────────────────────────────────────────
 // Each swatch: { swatch (border/accent), bg (badge background), icon (icon colour) }

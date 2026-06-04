@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var newProfileBtn = document.getElementById('newProfileBtn');
   var newProfileFlow = document.getElementById('newProfileFlow');
   var backToSettingsBtn = document.getElementById('backToSettingsBtn');
+  var _userTier = 'paid'; // default to Pro; updated from storage below
 
   // Questionnaire elements
   var mqPage1Content = document.getElementById('mq-page1-content');
@@ -190,6 +191,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
     var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
+    _userTier = tier;
     if (tier === 'free') {
       profilesSection.classList.add('locked-overlay');
       profilesList.innerHTML = '<div class="locked-label">Upgrade to Pro to create multiple profiles.</div>';
@@ -247,9 +249,10 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function updateNewProfileBtn() {
-    if (_cachedProfiles.length >= MAX_PROFILES) {
+    var maxProfiles = getMaxProfiles(_userTier);
+    if (_cachedProfiles.length >= maxProfiles) {
       newProfileBtn.disabled = true;
-      newProfileBtn.textContent = 'Max profiles reached (' + MAX_PROFILES + ')';
+      newProfileBtn.textContent = maxProfiles === Infinity ? 'Max profiles reached' : 'Max profiles reached (' + maxProfiles + ')';
     } else {
       newProfileBtn.disabled = false;
       newProfileBtn.textContent = '+ New Profile';
@@ -391,7 +394,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // ═══════════════════════════════════════════════════════════════════════════
 
   newProfileBtn.addEventListener('click', function () {
-    if (_cachedProfiles.length >= MAX_PROFILES) return;
+    if (_cachedProfiles.length >= getMaxProfiles(_userTier)) return;
     _editingProfile = null;
     _npDocument = null;
     npDocFileName.textContent = '';

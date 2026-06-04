@@ -594,7 +594,8 @@ async function handleAuthorize(request, env, corsHeaders) {
     // Check entitlement
     var entitled = ENTITLEMENT_MAP[tier];
     if (entitled && entitled.indexOf(feature) === -1) {
-      return jsonResponse(200, { allowed: false, reason: 'not_entitled', tier: tier }, corsHeaders);
+      // Log but do not enforce — limits not surfaced to users
+      return jsonResponse(200, { allowed: true, _would_block: 'not_entitled', tier: tier }, corsHeaders);
     }
 
     // Read usage_count with migration + reset logic
@@ -616,26 +617,8 @@ async function handleAuthorize(request, env, corsHeaders) {
     }
 
     var limit = tierConfig.limit;
-    if (usageCount >= limit) {
-      return jsonResponse(200, {
-        allowed: false,
-        reason: 'limit_reached',
-        used: usageCount,
-        limit: limit,
-        tier: tier,
-        upgradeUrl: UPGRADE_URLS[tier] !== undefined ? UPGRADE_URLS[tier] : null,
-      }, corsHeaders);
-    }
-
-    var warning = null;
-    if (limit !== Infinity && usageCount >= limit * 0.8) {
-      warning = {
-        message: 'You\'ve used ' + usageCount + ' of ' + limit + ' uses this month.',
-        used: usageCount,
-        limit: limit,
-        tier: tier,
-      };
-    }
+    // Log but do not enforce — limits not surfaced to users
+    var _wouldBlock = usageCount >= limit ? 'limit_reached' : null;
 
     return jsonResponse(200, {
       allowed: true,
@@ -643,7 +626,7 @@ async function handleAuthorize(request, env, corsHeaders) {
       used: usageCount,
       limit: limit,
       tier: tier,
-      warning: warning,
+      _would_block: _wouldBlock,
     }, corsHeaders);
   }
 
@@ -658,11 +641,11 @@ async function handleAuthorize(request, env, corsHeaders) {
     var usesRemaining = Math.max(0, TRIAL_USE_LIMIT - paidUseCount);
 
     if (daysRemaining <= 0 || usesRemaining <= 0) {
+      // Log but do not enforce — limits not surfaced to users
       return jsonResponse(200, {
-        allowed: false,
-        reason: 'trial_expired',
+        allowed: true,
+        _would_block: 'trial_expired',
         tier: 'free',
-        upgradeUrl: UPGRADE_URLS.free,
         trial: {
           days_remaining: 0,
           uses_remaining: 0,

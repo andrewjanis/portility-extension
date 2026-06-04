@@ -75,7 +75,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
     var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
-    if (tier === 'free') {
+    var isPremium = tier === 'paid2' || tier === 'paid3';
+    // Text mode and image compression are Premium-only features
+    if (!isPremium) {
       [imageQualitySection, portTextModeSection].forEach(function (section) {
         if (!section) return;
         section.classList.add('locked');
@@ -83,7 +85,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (toggle) toggle.checked = false;
         var label = document.createElement('span');
         label.className = 'paid-label';
-        label.textContent = 'Paid feature';
+        label.textContent = 'Premium feature';
         var titleEl = section.querySelector('.section-title');
         if (titleEl) titleEl.appendChild(label);
       });
@@ -372,16 +374,8 @@ document.addEventListener('DOMContentLoaded', function () {
         summaryText += ' this month';
       }
     }
-    // Trial info for free users
-    if (summary.trial) {
-      if (summary.trial.started && !summary.trial.expired) {
-        summaryText += ' | Trial: ' + summary.trial.days_remaining + 'd / ' + summary.trial.uses_remaining + ' uses left';
-      } else if (summary.trial.expired) {
-        summaryText += ' | Trial expired';
-      }
-    }
-
-    usageSummary.textContent = summaryText;
+    // Trial/usage info kept in backend but not surfaced to users
+    usageSummary.textContent = 'You are on ' + (summary.tierLabel || summary.tier);
 
     // History (only for paid users)
     if (!usageHistoryEl) return;
