@@ -1488,7 +1488,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
       openaiContent = [{ type: 'text', text: briefText }];
       for (var oi = 0; oi < images.length; oi++) {
         var oImg = images[oi];
-        if (!oImg.dataUrl) continue;
+        if (!oImg.dataUrl || !(/^data:image\//i.test(oImg.dataUrl))) continue;
         var oLabel = oImg.filename || oImg.alt || ('Image ' + (oi + 1));
         openaiContent.push({ type: 'text', text: '\n[Image: ' + oLabel + ']' });
         openaiContent.push({
