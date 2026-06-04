@@ -1378,7 +1378,7 @@ async function handleSummarizePro(request, env, corsHeaders) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
-      system: systemPrompt,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: [
         { role: 'user', content: userContent },
       ],
@@ -1468,7 +1468,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
-        system: systemPrompt,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages: [
           { role: 'user', content: anthropicContent },
         ],
@@ -1631,7 +1631,7 @@ async function handleCompare(request, env, corsHeaders) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: systemPrompt,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: [
         {
           role: 'user',

@@ -3083,61 +3083,82 @@ document.addEventListener('DOMContentLoaded', () => {
         await new Promise(function (r) { setTimeout(r, 3000 - _soStep1Elapsed); });
       }
 
-      // Steps 3-5: Summarize and second-opinion in parallel
-      updateSOStep(2, 'Summarizing & getting 2nd opinion...');
+      // Steps 3-5: Summarize (if long) and second-opinion in parallel
       var soDistinctId = await getDistinctId();
-
-      // Strip dataUrl from assets before sending to API
-      var soAssetsForApi = (extractResponse.assets || []).map(function (a) {
-        var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, role: a.role, turnIndex: a.turnIndex };
-        if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:')) copy.thumbnailUrl = a.thumbnailUrl;
-        return copy;
-      });
-      var soBody = {
-        conversation: extractResponse.text,
-        assets: soAssetsForApi,
-      };
-      if (soImagesForApi.length > 0) soBody.images = soImagesForApi;
-      var summarizePromise = fetch(proxyBase + '/summarize-pro', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
-        body: JSON.stringify(soBody),
-      });
-
       var soOpinionBody = { brief: extractResponse.text, platform: platform };
       if (soImagesForApi.length > 0) soOpinionBody.images = soImagesForApi;
-      var secondOpinionPromise = fetch(proxyBase + '/second-opinion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
-        body: JSON.stringify(soOpinionBody),
-      });
 
-      var [summaryResp, soResp] = await Promise.all([summarizePromise, secondOpinionPromise]);
+      // Skip summarize for short conversations (~3K tokens ≈ 12K chars) — pass raw text directly
+      var SO_SHORT_THRESHOLD = 12000;
+      var skipSummarize = extractResponse.text.length < SO_SHORT_THRESHOLD;
 
-      if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
-      var summaryData = await summaryResp.json();
-      trackTokenUsage('summarize-pro', summaryData._usage);
+      var artifact;
+      var soData;
 
-      var soData = await soResp.json();
-      if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
-      trackTokenUsage('second-opinion', soData._usage);
+      if (skipSummarize) {
+        updateSOStep(2, 'Getting 2nd opinion...');
+        var soResp = await fetch(proxyBase + '/second-opinion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
+          body: JSON.stringify(soOpinionBody),
+        });
+        soData = await soResp.json();
+        if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
+        trackTokenUsage('second-opinion', soData._usage);
+        artifact = extractResponse.text;
+      } else {
+        updateSOStep(2, 'Summarizing & getting 2nd opinion...');
 
-      var contentText = '';
-      if (summaryData.content && summaryData.content.length > 0) {
-        contentText = summaryData.content[0].text || '';
+        // Strip dataUrl from assets before sending to API
+        var soAssetsForApi = (extractResponse.assets || []).map(function (a) {
+          var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, role: a.role, turnIndex: a.turnIndex };
+          if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:')) copy.thumbnailUrl = a.thumbnailUrl;
+          return copy;
+        });
+        var soBody = {
+          conversation: extractResponse.text,
+          assets: soAssetsForApi,
+        };
+        if (soImagesForApi.length > 0) soBody.images = soImagesForApi;
+        var summarizePromise = fetch(proxyBase + '/summarize-pro', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
+          body: JSON.stringify(soBody),
+        });
+
+        var secondOpinionPromise = fetch(proxyBase + '/second-opinion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Portility-Distinct-Id': soDistinctId },
+          body: JSON.stringify(soOpinionBody),
+        });
+
+        var [summaryResp, soResp] = await Promise.all([summarizePromise, secondOpinionPromise]);
+
+        if (!summaryResp.ok) throw new Error('AI analysis failed (HTTP ' + summaryResp.status + ')');
+        var summaryData = await summaryResp.json();
+        trackTokenUsage('summarize-pro', summaryData._usage);
+
+        soData = await soResp.json();
+        if (!soResp.ok) throw new Error(soData.error || 'Second opinion request failed');
+        trackTokenUsage('second-opinion', soData._usage);
+
+        var contentText = '';
+        if (summaryData.content && summaryData.content.length > 0) {
+          contentText = summaryData.content[0].text || '';
+        }
+
+        var parsed;
+        try {
+          var jsonStr = contentText;
+          var codeBlockMatch = contentText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+          if (codeBlockMatch) jsonStr = codeBlockMatch[1];
+          parsed = JSON.parse(jsonStr);
+        } catch (e) {
+          parsed = { title: 'Project Brief', brief: contentText, assets: [] };
+        }
+
+        artifact = parsed.brief || contentText;
       }
-
-      var parsed;
-      try {
-        var jsonStr = contentText;
-        var codeBlockMatch = contentText.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-        if (codeBlockMatch) jsonStr = codeBlockMatch[1];
-        parsed = JSON.parse(jsonStr);
-      } catch (e) {
-        parsed = { title: 'Project Brief', brief: contentText, assets: [] };
-      }
-
-      var artifact = parsed.brief || contentText;
 
       // Compress any embedded base64 images in the summary
       var imgRegex = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g;
