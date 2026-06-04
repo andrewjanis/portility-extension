@@ -60,10 +60,13 @@ async function writeClipboard(text) {
 }
 
 // ─── Filename helper ─────────────────────────────────────────────────────────
-function safeChatFilename(title) {
+function safeChatFilename(title, platform) {
   var name = title.replace(/\s*[-|]\s*(Claude|ChatGPT|Gemini|Copilot).*$/i, '').trim();
   name = name.replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-  return name || 'portility-conversation';
+  name = name || 'portility-conversation';
+  var aiLabel = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[platform] || platform || '';
+  var date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return name + (aiLabel ? '-' + aiLabel : '') + '-' + date;
 }
 
 // ─── Error capture ────────────────────────────────────────────────────────────
@@ -446,6 +449,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // else _userTier stays 'free' (the default)
     applyTierUI();
+
+    // Background refresh from Firestore so tier updates after upgrade/downgrade
+    if (!result.devTierOverride) {
+      try {
+        var auth = await ensureAuthenticated();
+        var freshTier = await getUserTier(auth.idToken, auth.firebaseUid);
+        if (freshTier !== _userTier) {
+          console.log('[Popup] Tier changed:', _userTier, '→', freshTier);
+          _userTier = freshTier;
+          chrome.storage.local.set({ userTier: { tier: freshTier, timestamp: Date.now() } });
+          applyTierUI();
+        }
+      } catch (e) {
+        // Not authenticated or fetch failed — keep cached tier
+      }
+    }
   }
 
   function refreshTierSilently(auth) {
@@ -888,8 +907,9 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } else if (sec.type === 'range') {
           var rangeEl = document.getElementById('q-range-' + sec.key);
-          if (rangeEl && qAnswers[sec.key]) {
+          if (rangeEl && qAnswers[sec.key] != null) {
             rangeEl.value = qAnswers[sec.key];
+            rangeEl.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } else if (sec.type === 'textarea') {
           var ta = document.getElementById('q-textarea-' + sec.key);
@@ -2222,7 +2242,9 @@ document.addEventListener('DOMContentLoaded', () => {
           blobUrl = URL.createObjectURL(blob);
           chrome.downloads.download({
             url: blobUrl,
-            filename: pmcTextMode === 'summary' ? 'portility-pro-brief.md' : safeChatFilename((_pmcProTab && _pmcProTab.title) || '') + '.txt',
+            filename: pmcTextMode === 'summary'
+              ? 'portility-pro-brief-' + ({ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[_pmcProTab && _pmcProTab.sourcePlatform] || '') + '-' + new Date().toISOString().slice(0, 10) + '.md'
+              : safeChatFilename((_pmcProTab && _pmcProTab.title) || '', _pmcProTab && _pmcProTab.sourcePlatform) + '.txt',
             saveAs: true,
           }, function () {
             URL.revokeObjectURL(blobUrl);
@@ -2290,7 +2312,7 @@ document.addEventListener('DOMContentLoaded', () => {
           blobUrl = URL.createObjectURL(blob);
           chrome.downloads.download({
             url: blobUrl,
-            filename: 'portility-pro-' + (safeTitle || 'brief') + '.md',
+            filename: 'portility-pro-' + (safeTitle || 'brief') + '-' + ({ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[_proData.sourcePlatform] || '') + '-' + new Date().toISOString().slice(0, 10) + '.md',
             saveAs: true,
           }, function () {
             URL.revokeObjectURL(blobUrl);
@@ -2412,7 +2434,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         chrome.downloads.download({
           url: blobUrl,
-          filename: safeChatFilename(tab.title) + '.txt',
+          filename: safeChatFilename(tab.title, /claude\.ai/i.test(tab.url) ? 'claude' : /chatgpt\.com/i.test(tab.url) ? 'chatgpt' : /gemini\.google\.com/i.test(tab.url) ? 'gemini' : '') + '.txt',
           saveAs: true,
         }, () => {
           URL.revokeObjectURL(blobUrl);
