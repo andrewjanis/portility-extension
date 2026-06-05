@@ -731,10 +731,17 @@
       var typeMatch = cardText.match(/\b(PDF|DOCX?|XLSX?|CSV|TXT|PPTX?|HTML|JSON|XML|ZIP|PY|JS|TS|MD|RTF)\b/i);
       var fileType = typeMatch ? typeMatch[1].toLowerCase() : null;
 
-      // Skip elements that are not real file cards — Gemini reuses <generated-file>
-      // for suggestion chips, image captions, and other interactive content.
-      // Real file cards have a .file-name element and/or a file type label.
-      if (!nameEl && !fileType) continue;
+      // Skip suggestion chips — Gemini reuses <generated-file> for suggestion
+      // buttons, image captions, and real file cards. Real files have .file-name
+      // or type labels. Image captions are short text. Suggestion chips are long
+      // sentences, often with question marks or table-like content.
+      if (!nameEl && !fileType) {
+        var rawText = cardText.replace(/\s+/g, ' ');
+        if (rawText.length > 100 || /\?/.test(rawText)) {
+          console.log('[Portility] Skipping likely suggestion chip:', rawText.substring(0, 60));
+          continue;
+        }
+      }
 
       if (!filename) {
         // Fallback: extract from full text, removing known button/label words
