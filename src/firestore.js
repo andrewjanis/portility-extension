@@ -123,8 +123,8 @@ async function getUserTier(idToken, firebaseUid) {
     }
 
     if (!response.ok) {
-      console.error('[Firestore] Error fetching user data:', response.status);
-      return 'free';
+      console.error('[Firestore] Error fetching user tier:', response.status);
+      throw new Error('Firestore HTTP ' + response.status);
     }
 
     var doc = await response.json();
@@ -140,8 +140,8 @@ async function getUserTier(idToken, firebaseUid) {
     console.log('[Firestore] User tier:', tier);
     return tier;
   } catch (error) {
-    console.error('[Firestore] Error fetching user data:', error);
-    return 'free';
+    console.error('[Firestore] Error fetching user tier:', error);
+    throw error;
   }
 }
 

@@ -349,6 +349,9 @@ document.addEventListener('DOMContentLoaded', function () {
           } else {
             getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
               resolve({ auth: auth, tier: tier });
+            }).catch(function (e) {
+              console.log('[Options] getUserTier failed, defaulting to free:', e.message || e);
+              resolve({ auth: auth, tier: 'free' });
             });
           }
         });

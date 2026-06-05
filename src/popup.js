@@ -450,20 +450,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // else _userTier stays 'free' (the default)
     applyTierUI();
 
-    // Background refresh from Firestore so tier updates after upgrade/downgrade
+    // Background refresh from Firestore so tier updates after upgrade/downgrade.
+    // Use cached tokens directly to avoid ensureAuthenticated() triggering an
+    // interactive auth popup that would close this popup before the fetch completes.
     if (!result.devTierOverride) {
       try {
-        var auth = await ensureAuthenticated();
-        var freshTier = await getUserTier(auth.idToken, auth.firebaseUid);
-        console.log('[Popup] Firestore tier check: cached=' + _userTier + ' fresh=' + freshTier);
-        if (freshTier !== _userTier) {
-          console.log('[Popup] Tier changed:', _userTier, '→', freshTier);
-          _userTier = freshTier;
-          chrome.storage.local.set({ userTier: { tier: freshTier, timestamp: Date.now() } });
+        var authCache = await new Promise(function (resolve) {
+          chrome.storage.local.get(['firebase_id_token', 'firebase_uid', 'firebase_token_expiry'], function (d) { resolve(d); });
+        });
+        if (authCache.firebase_id_token && authCache.firebase_uid) {
+          console.log('[Popup] Tier refresh: using cached token for uid=' + authCache.firebase_uid);
+          var freshTier = await getUserTier(authCache.firebase_id_token, authCache.firebase_uid);
+          console.log('[Popup] Firestore tier: cached=' + _userTier + ' fresh=' + freshTier);
+          if (freshTier !== _userTier) {
+            console.log('[Popup] Tier changed:', _userTier, '→', freshTier);
+            _userTier = freshTier;
+            chrome.storage.local.set({ userTier: { tier: freshTier, timestamp: Date.now() } });
+          }
           applyTierUI();
+        } else {
+          console.log('[Popup] No cached Firebase token — skipping tier refresh');
         }
       } catch (e) {
-        console.log('[Popup] Tier refresh failed:', e.message || e);
+        console.log('[Popup] Tier refresh failed (keeping cached tier ' + _userTier + '):', e.message || e);
       }
     } else {
       console.log('[Popup] Skipping Firestore tier check — devTierOverride active:', result.devTierOverride);
@@ -1970,18 +1979,19 @@ document.addEventListener('DOMContentLoaded', () => {
   showNormalUI();
 
   // ── Check if active tab has a conversation ────────────────────────────────
+  var _isSupportedPage = false;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs && tabs[0];
     if (!tab || !tab.url) {
-      setStatus('Open a conversation on Claude, ChatGPT, or Gemini to get started.');
+      setStatus('This website is not supported. Try porting from an AI chat.');
       return;
     }
 
     const url = tab.url;
-    const isSupported = /claude\.ai/i.test(url) || /chatgpt\.com/i.test(url) || /gemini\.google\.com/i.test(url);
+    _isSupportedPage = /claude\.ai/i.test(url) || /chatgpt\.com/i.test(url) || /gemini\.google\.com/i.test(url);
 
-    if (!isSupported) {
-      setStatus('Open a conversation on Claude, ChatGPT, or Gemini to get started.');
+    if (!_isSupportedPage) {
+      setStatus('This website is not supported. Try porting from an AI chat.');
       return;
     }
 
@@ -1996,6 +2006,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Port Your Conversation button → show Screen 2 ────────────────────────
   copyBtn.addEventListener('click', async () => {
+    if (!_isSupportedPage) {
+      setStatus('This website is not supported. Try porting from an AI chat.', true);
+      return;
+    }
     crumb('port_chat_start');
     try {
       var auth = await ensureAuthenticated();
@@ -2390,7 +2404,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await new Promise((resolve, reject) => {
         chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT', skipClipboard: true }, (resp) => {
           if (chrome.runtime.lastError) {
-            reject(new Error('Could not reach the page \u2014 try refreshing.'));
+            reject(new Error('This website is not supported. Try porting from an AI chat.'));
             return;
           }
           if (!resp || !resp.success) {
@@ -2730,6 +2744,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   proChatBtn.addEventListener('click', async function () {
+    if (!_isSupportedPage) {
+      setStatus('This website is not supported. Try porting from an AI chat.', true);
+      return;
+    }
     proChatBtn.disabled = true;
     setStatus('');
 
@@ -2799,7 +2817,7 @@ document.addEventListener('DOMContentLoaded', () => {
       _pmcProExtractPromise = new Promise(function (resolve, reject) {
         chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO' }, function (resp) {
           if (chrome.runtime.lastError) {
-            reject(new Error('Could not reach the page \u2014 try refreshing.'));
+            reject(new Error('This website is not supported. Try porting from an AI chat.'));
             return;
           }
           if (!resp || !resp.success) {
@@ -3038,7 +3056,7 @@ document.addEventListener('DOMContentLoaded', () => {
       var extractResponse = await new Promise(function (resolve, reject) {
         chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO' }, function (resp) {
           if (chrome.runtime.lastError) {
-            reject(new Error('Could not reach the page \u2014 try refreshing.'));
+            reject(new Error('This website is not supported. Try porting from an AI chat.'));
             return;
           }
           if (!resp || !resp.success) {
@@ -3704,6 +3722,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   secondOpinionBtn.addEventListener('click', function () {
+    if (!_isSupportedPage) {
+      setStatus('This website is not supported. Try porting from an AI chat.', true);
+      return;
+    }
     triggerSecondOpinion();
   });
 
