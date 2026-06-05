@@ -21,26 +21,33 @@ document.addEventListener('DOMContentLoaded', function () {
   devTierStatus.style.cssText = 'font-size:11px;color:#f97316;margin-top:4px;';
   devTierContainer.parentNode.insertBefore(devTierStatus, devTierContainer.nextSibling);
 
-  chrome.storage.local.get('devTierOverride', function (result) {
+  chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
     var tier = result.devTierOverride || null;
+    var actual = (result.userTier && result.userTier.tier) || 'free';
     if (tier) {
       var match = devTierContainer.querySelector('input[value="' + tier + '"]');
       if (match) match.checked = true;
-      devTierStatus.textContent = 'Active override: ' + tier;
+      devTierStatus.textContent = 'Active override: ' + tier + ' (actual: ' + actual + ')';
     } else {
-      // No override — show actual tier from userTier
-      chrome.storage.local.get('userTier', function (r) {
-        var actual = (r.userTier && r.userTier.tier) || 'free';
-        var match = devTierContainer.querySelector('input[value="' + actual + '"]');
-        if (match) match.checked = true;
-        devTierStatus.textContent = 'No override (actual: ' + actual + ')';
-      });
+      // No override — select "None" and show actual tier
+      var noneRadio = devTierContainer.querySelector('input[value="none"]');
+      if (noneRadio) noneRadio.checked = true;
+      devTierStatus.textContent = 'No override (actual: ' + actual + ')';
     }
   });
 
   devTierContainer.addEventListener('change', function (e) {
     if (e.target.name !== 'devTier') return;
     var newTier = e.target.value;
+    // "None" clears the override — uses real Firestore tier
+    if (newTier === 'none') {
+      console.log('[Options] Clearing dev tier override');
+      chrome.storage.local.remove('devTierOverride', function () {
+        console.log('[Options] Dev tier override cleared, reloading');
+        location.reload();
+      });
+      return;
+    }
     // Block paid3 override — server-side only assignment
     if (newTier === 'paid3') {
       devTierStatus.textContent = 'paid3 cannot be set via dev override';
@@ -52,11 +59,8 @@ document.addEventListener('DOMContentLoaded', function () {
           var match = devTierContainer.querySelector('input[value="' + prev + '"]');
           if (match) match.checked = true;
         } else {
-          chrome.storage.local.get('userTier', function (r2) {
-            var actual = (r2.userTier && r2.userTier.tier) || 'free';
-            var match2 = devTierContainer.querySelector('input[value="' + actual + '"]');
-            if (match2) match2.checked = true;
-          });
+          var noneRadio = devTierContainer.querySelector('input[value="none"]');
+          if (noneRadio) noneRadio.checked = true;
         }
       });
       return;

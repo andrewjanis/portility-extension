@@ -455,6 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         var auth = await ensureAuthenticated();
         var freshTier = await getUserTier(auth.idToken, auth.firebaseUid);
+        console.log('[Popup] Firestore tier check: cached=' + _userTier + ' fresh=' + freshTier);
         if (freshTier !== _userTier) {
           console.log('[Popup] Tier changed:', _userTier, '→', freshTier);
           _userTier = freshTier;
@@ -462,8 +463,10 @@ document.addEventListener('DOMContentLoaded', () => {
           applyTierUI();
         }
       } catch (e) {
-        // Not authenticated or fetch failed — keep cached tier
+        console.log('[Popup] Tier refresh failed:', e.message || e);
       }
+    } else {
+      console.log('[Popup] Skipping Firestore tier check — devTierOverride active:', result.devTierOverride);
     }
   }
 
