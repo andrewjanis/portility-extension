@@ -771,16 +771,35 @@
 
       seenFiles[key] = true;
 
-      // Check for <img> inside the card — image cards have visible thumbnails
-      // that we can capture directly instead of relying on click extraction.
+      // Check for <img> inside the card or in nearby elements — Gemini renders
+      // image cards as a caption/attribution <generated-file> near the actual
+      // <img> (sibling, parent, or preceding element).
       var imgEl = gfEl.querySelector('img[src]');
+      if (!imgEl) {
+        // Search parent and siblings for an <img>
+        var searchCtx = gfEl.parentElement;
+        if (searchCtx) {
+          imgEl = searchCtx.querySelector('img[src]');
+          // Also check previous sibling containers
+          if (!imgEl) {
+            var prev = gfEl.previousElementSibling;
+            for (var ps = 0; ps < 3 && prev && !imgEl; ps++) {
+              imgEl = prev.querySelector ? (prev.querySelector('img[src]') || (prev.tagName === 'IMG' ? prev : null)) : null;
+              prev = prev.previousElementSibling;
+            }
+          }
+        }
+      }
       var imgSrc = imgEl ? (imgEl.src || '') : '';
-      var isImageCard = imgSrc && imgSrc.length > 200 && !imgSrc.includes('.svg');
+      // Valid image: not an SVG icon, not a tiny data URL placeholder
+      var isImageCard = imgSrc && !imgSrc.includes('.svg') &&
+        (!imgSrc.startsWith('data:') || imgSrc.length > 500);
       if (isImageCard) {
-        // This is an image card — push as image type with the thumbnail URL
+        // This is an image card — push as image type with the URL
+        var imgFname = filename.replace(/\.[^.]*$/, '').replace(/_+$/, '') + '.jpg';
         results.push({
           url: imgSrc,
-          filename: filename.replace(/\.[^.]+$/, '') + '.jpg',
+          filename: imgFname,
           turnIndex: -1,
           role: 'Assistant',
           dataUrl: null,
@@ -790,7 +809,7 @@
           _isImage: true,
         });
         console.log('[Portility] Detected Gemini image card:', filename,
-          'imgSrc:', imgSrc.substring(0, 80));
+          'imgSrc:', imgSrc.substring(0, 100));
         continue;
       }
 
