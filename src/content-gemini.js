@@ -585,11 +585,12 @@
           }
         }
       }
+      var assetType = cand._isImage ? 'image' : 'file';
       newAssets.push({
-        type: 'file',
+        type: assetType,
         url: cand.url,
         alt: cand.filename,
-        thumbnailUrl: null,
+        thumbnailUrl: assetType === 'image' ? cand.url : null,
         filename: cand.filename,
         turnIndex: cand.turnIndex,
         role: cand.role || 'Assistant',
@@ -769,6 +770,29 @@
       if (/\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(filename)) continue;
 
       seenFiles[key] = true;
+
+      // Check for <img> inside the card — image cards have visible thumbnails
+      // that we can capture directly instead of relying on click extraction.
+      var imgEl = gfEl.querySelector('img[src]');
+      var imgSrc = imgEl ? (imgEl.src || '') : '';
+      var isImageCard = imgSrc && imgSrc.length > 200 && !imgSrc.includes('.svg');
+      if (isImageCard) {
+        // This is an image card — push as image type with the thumbnail URL
+        results.push({
+          url: imgSrc,
+          filename: filename.replace(/\.[^.]+$/, '') + '.jpg',
+          turnIndex: -1,
+          role: 'Assistant',
+          dataUrl: null,
+          _el: null, // no click needed
+          _genFileEl: gfEl,
+          _priority: 1,
+          _isImage: true,
+        });
+        console.log('[Portility] Detected Gemini image card:', filename,
+          'imgSrc:', imgSrc.substring(0, 80));
+        continue;
+      }
 
       // Extract URL from any <a href> inside the card
       var linkEl = gfEl.querySelector('a[href]');
