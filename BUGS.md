@@ -24,3 +24,13 @@ Severity: **P0** (blocker), **P1** (major), **P2** (minor), **P3** (cosmetic)
 **Root cause:** The OpenAI `/second-opinion` path sent all assets as `image_url` content blocks without filtering by MIME type. The Anthropic path correctly filtered with `data:image/...` regex, but the OpenAI path only checked for `dataUrl` existence.
 
 **Fix:** Added `!(/^data:image\//i.test(oImg.dataUrl))` filter to skip non-image assets in the OpenAI path. (`worker/worker.js`)
+
+## [T2.2] P1 — Phantom HTML artifact appears in image selector
+
+**Description:** Image selection shows a non-existent HTML file as a selectable asset. Claude artifacts (rendered HTML previews) are detected as file attachments because they use the same `data-testid="file-thumbnail"` DOM marker as real uploaded files.
+
+**Root cause:** `detectClaudeFileAttachments()` in `content.js` scans for `[data-testid="file-thumbnail"]` markers. Claude's artifact previews reuse the same DOM structure, so the function picks up artifact cards, clicks them to extract content via `extractFileViaClick()`, and produces a data URL from the rendered artifact HTML.
+
+Additionally, the separate artifact detection (`[class*="artifact"]`) was matching every nested element inside artifact containers, creating duplicate bloated entries with the full rendered textContent as alt text.
+
+**Fix:** (1) Added artifact container check in `detectClaudeFileAttachments` — skips any file-thumbnail inside `[class*="artifact"]` or `[data-testid*="artifact"]`. (2) Tightened artifact detection to only match outermost containers, deduplicate by title, and prefer aria-label/title attributes over raw textContent. (`src/content.js`)

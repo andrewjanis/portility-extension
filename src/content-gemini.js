@@ -205,27 +205,6 @@
         filePreviewEl.removeAttribute('data-portility-click');
         var viewFileData = await resolveCapture(viewFileResult, filename);
         if (viewFileData) {
-          // Check if we got a PDF fallback for a non-PDF file
-          var vfMime = (viewFileData.match(/^data:([^;,]+)/) || [])[1] || '';
-          var vfExt = (filename.match(/\.([^.]+)$/) || [])[1] || '';
-          if (vfExt && vfMime === 'application/pdf' && !/^pdf$/i.test(vfExt)) {
-            // Strategy 1c: Try to get original file via Drive viewer iframe download button
-            console.log('[Portility] Got PDF for', filename, '— trying iframe download');
-            var iframeData = await new Promise(function (r) {
-              chrome.runtime.sendMessage({ type: 'IFRAME_VIEWER_DOWNLOAD' }, function (res) { r(res); });
-            });
-            if (iframeData && iframeData.dataUrl && iframeData.dataUrl.length > 500) {
-              var ifMime = (iframeData.dataUrl.match(/^data:([^;,]+)/) || [])[1] || '';
-              if (ifMime !== 'application/pdf') {
-                console.log('[Portility] Got original from iframe:', Math.round(iframeData.dataUrl.length / 1024), 'KB', ifMime);
-                closeSidePanel(); resolve(iframeData.dataUrl); return;
-              } else {
-                console.log('[Portility] Iframe download also returned PDF');
-              }
-            } else if (iframeData) {
-              console.log('[Portility] Iframe scan result:', JSON.stringify(iframeData).substring(0, 500));
-            }
-          }
           closeSidePanel(); resolve(viewFileData); return;
         }
       }
@@ -594,7 +573,17 @@
         }
         console.log('[Portility] Attempting click-based extraction for:', cand.filename, '[p' + (cand._priority || 0) + ']');
         var dataUrl = await extractGeminiFileViaClick(cand._el, cand.filename, cand._priority, cand._genFileEl);
-        if (dataUrl) cand.dataUrl = dataUrl;
+        if (dataUrl) {
+          cand.dataUrl = dataUrl;
+          // If we got a PDF but the file isn't a PDF, correct the extension
+          // (Gemini's Drive viewer only serves PDF-converted versions of uploaded docs)
+          var dataMime = (dataUrl.match(/^data:([^;,]+)/) || [])[1] || '';
+          var fileExt = (cand.filename.match(/\.([^.]+)$/) || [])[1] || '';
+          if (fileExt && dataMime === 'application/pdf' && !/^pdf$/i.test(fileExt)) {
+            console.log('[Portility] Original', fileExt.toUpperCase(), 'unavailable —', cand.filename, 'saved as PDF');
+            cand.filename = cand.filename.replace(/\.[^.]+$/, '.pdf');
+          }
+        }
       }
       newAssets.push({
         type: 'file',

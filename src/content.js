@@ -256,6 +256,15 @@
       // The button is a sibling inside the same parent (div.relative)
       var card = marker.parentElement;
       if (!card) continue;
+
+      // Skip file thumbnails inside artifact containers — Claude renders artifact
+      // previews (e.g. HTML files) with the same file-thumbnail markers as real
+      // uploaded files, but they are not real attachments.
+      if (card.closest('[class*="artifact"], [data-testid*="artifact"]')) {
+        console.log('[Portility] Skipping file-thumbnail inside artifact container');
+        continue;
+      }
+
       var btn = card.querySelector('button') || card;
 
       // Extract filename from the button card. The button has child divs:
@@ -537,21 +546,33 @@
             allAssets = allAssets.concat(turnAssets);
           }
 
-          // Claude-specific: scan for artifact references in conversation
-          var artifactEls = scope.querySelectorAll('[class*="artifact"], [data-testid*="artifact"]');
-          for (var j = 0; j < artifactEls.length; j++) {
-            var title = artifactEls[j].textContent.trim() || artifactEls[j].getAttribute('aria-label') || '';
-            if (title) {
-              allAssets.push({
-                type: 'artifact',
-                url: null,
-                alt: title,
-                thumbnailUrl: null,
-                filename: title.replace(/[^a-zA-Z0-9_.\- ]/g, '_').substring(0, 80),
-                turnIndex: -1,
-                role: 'Assistant',
-              });
+          // Claude-specific: scan for artifact references in conversation.
+          // Only match top-level artifact containers to avoid duplicates from
+          // nested elements. Filter out elements whose parent also matches
+          // (i.e. keep outermost only).
+          var artifactCandidates = scope.querySelectorAll('[class*="artifact"], [data-testid*="artifact"]');
+          var seenArtifactTitles = {};
+          for (var j = 0; j < artifactCandidates.length; j++) {
+            var artEl = artifactCandidates[j];
+            // Skip nested elements — only keep the outermost artifact container
+            if (artEl.parentElement && artEl.parentElement.closest('[class*="artifact"], [data-testid*="artifact"]')) continue;
+            // Prefer aria-label or title attribute (clean name) over raw textContent
+            var artTitle = artEl.getAttribute('aria-label') || artEl.getAttribute('title') || '';
+            if (!artTitle) {
+              // Fallback: first line of text content, capped to avoid capturing entire rendered content
+              artTitle = (artEl.textContent || '').trim().split('\n')[0].substring(0, 120);
             }
+            if (!artTitle || seenArtifactTitles[artTitle]) continue;
+            seenArtifactTitles[artTitle] = true;
+            allAssets.push({
+              type: 'artifact',
+              url: null,
+              alt: artTitle,
+              thumbnailUrl: null,
+              filename: artTitle.replace(/[^a-zA-Z0-9_.\- ]/g, '_').substring(0, 80),
+              turnIndex: -1,
+              role: 'Assistant',
+            });
           }
 
           // Claude-specific: detect uploaded file attachments (rendered as cards, not links)
