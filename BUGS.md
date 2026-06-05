@@ -34,3 +34,11 @@ Severity: **P0** (blocker), **P1** (major), **P2** (minor), **P3** (cosmetic)
 Additionally, the separate artifact detection (`[class*="artifact"]`) was matching every nested element inside artifact containers, creating duplicate bloated entries with the full rendered textContent as alt text.
 
 **Fix:** (1) Added artifact container check in `detectClaudeFileAttachments` — skips any file-thumbnail inside `[class*="artifact"]` or `[data-testid*="artifact"]`. (2) Tightened artifact detection to only match outermost containers, deduplicate by title, and prefer aria-label/title attributes over raw textContent. (`src/content.js`)
+
+## [T2.3-Gemini] P0 — Suggestion chips trigger never-ending loop on Gemini
+
+**Description:** Gemini's follow-up suggestion buttons use the same `<generated-file>` custom element as real file cards. The file detection code clicks these, submitting new queries to Gemini and creating an infinite loop.
+
+**Root cause:** `scanForGeneratedFileElements()` in `content-gemini.js` treats every `<generated-file>` element as a file card. Gemini reuses this element for suggestion chips, image captions, and other non-file content. These lack a `.file-name` child element and file type labels but were still processed and clicked.
+
+**Fix:** Added guard in `scanForGeneratedFileElements` — skip elements that have neither a `.file-name` element nor a recognized file type label (PDF, DOCX, etc.). Real file cards always have at least one of these. (`src/content-gemini.js`)

@@ -726,9 +726,19 @@
       var nameEl = gfEl.querySelector('.file-name, [class*="file-name"]');
       var filename = nameEl ? nameEl.textContent.trim() : '';
 
+      // Determine file type from sibling text or nearby context
+      var cardText = (gfEl.textContent || '').trim();
+      var typeMatch = cardText.match(/\b(PDF|DOCX?|XLSX?|CSV|TXT|PPTX?|HTML|JSON|XML|ZIP|PY|JS|TS|MD|RTF)\b/i);
+      var fileType = typeMatch ? typeMatch[1].toLowerCase() : null;
+
+      // Skip elements that are not real file cards — Gemini reuses <generated-file>
+      // for suggestion chips, image captions, and other interactive content.
+      // Real file cards have a .file-name element and/or a file type label.
+      if (!nameEl && !fileType) continue;
+
       if (!filename) {
         // Fallback: extract from full text, removing known button/label words
-        var fullText = (gfEl.textContent || '').trim();
+        var fullText = cardText;
         filename = fullText
           .replace(/\b(Open|Download|View|Save)\b/gi, '')
           .replace(/\b(PDF|DOCX?|XLSX?|CSV|TXT|PPTX?|HTML|JSON|XML|ZIP)\b/gi, '')
@@ -741,11 +751,6 @@
 
       // Clean up filename
       filename = filename.replace(/\s+/g, '_').replace(/_+/g, '_');
-
-      // Determine file type from sibling text or nearby context
-      var cardText = (gfEl.textContent || '').trim();
-      var typeMatch = cardText.match(/\b(PDF|DOCX?|XLSX?|CSV|TXT|PPTX?|HTML|JSON|XML|ZIP|PY|JS|TS|MD|RTF)\b/i);
-      var fileType = typeMatch ? typeMatch[1].toLowerCase() : null;
 
       // Add extension if missing
       if (filename.indexOf('.') === -1) {
