@@ -362,9 +362,11 @@
       .catch(function () {
         console.log('[Portility] Same-origin fetch failed for', src.substring(0, 80), '— trying background');
         return fetchViaBackground(src).then(function (bgDataUrl) {
-          // Reject HTML content from background fetch for non-.html URLs
-          if (!isHtmlUrl && bgDataUrl && /^data:text\/html/i.test(bgDataUrl)) {
-            console.log('[Portility] Skipping HTML background response for:', src.substring(0, 80));
+          // Always reject HTML from background fetch — if same-origin fetch failed,
+          // the URL is cross-origin, so any HTML response is a web page, not a
+          // legitimate file attachment (those are served from the platform's domain).
+          if (bgDataUrl && /^data:text\/html/i.test(bgDataUrl)) {
+            console.log('[Portility] Skipping HTML from cross-origin background fetch:', src.substring(0, 80));
             return null;
           }
           return bgDataUrl;
