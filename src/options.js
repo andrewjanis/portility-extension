@@ -97,9 +97,13 @@ document.addEventListener('DOMContentLoaded', function () {
     ['portility_drive_backup_enabled', 'portility_compress_images', 'devTierOverride', 'userTier'],
     function (result) {
       var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
+      var isPremium = tier === 'paid2' || tier === 'paid3';
       if (tier !== 'free') {
         driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
-        compressToggle.checked = result.portility_compress_images !== false;
+        // Only load saved compress preference for Premium — Pro is locked to OFF (uncompressed)
+        if (isPremium) {
+          compressToggle.checked = result.portility_compress_images === true;
+        }
       } else {
         driveBackupToggle.checked = false;
         compressToggle.checked = false;
@@ -171,13 +175,18 @@ document.addEventListener('DOMContentLoaded', function () {
   // ─── Port text mode toggle ──────────────────────────────────────────────
   var portTextModeToggle = document.getElementById('portTextModeToggle');
 
-  chrome.storage.local.get('portility_pmc_text_mode', function (result) {
-    var mode = result.portility_pmc_text_mode || 'full';
-    portTextModeToggle.checked = mode === 'full';
+  chrome.storage.local.get(['portility_pmc_text_mode', 'devTierOverride', 'userTier'], function (result) {
+    var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
+    var isPremium = tier === 'paid2' || tier === 'paid3';
+    // Only load saved text mode for Premium — Pro is locked to OFF (full text)
+    if (isPremium) {
+      var mode = result.portility_pmc_text_mode || 'full';
+      portTextModeToggle.checked = mode === 'summary';
+    }
   });
 
   portTextModeToggle.addEventListener('change', function () {
-    var mode = portTextModeToggle.checked ? 'full' : 'summary';
+    var mode = portTextModeToggle.checked ? 'summary' : 'full';
     chrome.storage.local.set({ portility_pmc_text_mode: mode });
   });
 
