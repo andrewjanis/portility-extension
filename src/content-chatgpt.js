@@ -351,6 +351,7 @@
             turnIndex: 0,
             role: entry.role || 'Assistant',
             dataUrl: dataUrl,
+            _fileId: entry.fileId.replace(/^[a-z-]+:\/\//i, ''),
           });
           console.log('[Portility] Downloaded ChatGPT file:', fname, '(' + Math.round(dataUrl.length / 1024) + ' KB)');
         }
@@ -478,6 +479,22 @@
           // Detect ChatGPT file attachments via conversation API
           var chatgptFiles = await detectChatGPTFileAttachments();
           if (chatgptFiles.length > 0) {
+            // Deduplicate: API downloads have full-quality data, so they replace
+            // any DOM-extracted asset with the same filename or file ID in URL.
+            var apiFileNames = {};
+            var apiFileIds = [];
+            for (var af = 0; af < chatgptFiles.length; af++) {
+              apiFileNames[(chatgptFiles[af].filename || '').toLowerCase()] = true;
+              if (chatgptFiles[af]._fileId) apiFileIds.push(chatgptFiles[af]._fileId);
+            }
+            allAssets = allAssets.filter(function (a) {
+              if (apiFileNames[(a.filename || '').toLowerCase()]) return false;
+              var aUrl = (a.url || '');
+              for (var fi = 0; fi < apiFileIds.length; fi++) {
+                if (aUrl.indexOf(apiFileIds[fi]) >= 0) return false;
+              }
+              return true;
+            });
             allAssets = allAssets.concat(chatgptFiles);
           }
 
