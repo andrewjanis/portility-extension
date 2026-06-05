@@ -216,6 +216,15 @@
       var textMatchesFile = FILE_EXTENSIONS.test(linkText) || IMAGE_EXTENSIONS.test(linkText);
       var urlMatchesFile = FILE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(href);
 
+      // Skip links to third-party domains that only matched on link text — these are
+      // regular web links (e.g. "samsung.com/.../me16a4.html") not file attachments.
+      // Real file attachments are served from the platform's domain or have download attr.
+      if (textMatchesFile && !urlMatchesFile && !hasDownloadAttr) {
+        try {
+          if (new URL(href).hostname !== location.hostname) return;
+        } catch (e) { /* invalid URL, skip safely */ return; }
+      }
+
       if (urlMatchesFile || hasDownloadAttr || textMatchesFile) {
         seenHrefs[href] = true;
         var isImage = IMAGE_EXTENSIONS.test(href) || IMAGE_EXTENSIONS.test(linkText);
@@ -329,12 +338,20 @@
    * Falls back to fetchViaBackground if same-origin fetch fails.
    */
   function fetchWithCookies(src) {
+    var isHtmlUrl = /\.html?(\?|#|$)/i.test(src);
     return fetch(src, { credentials: 'include' })
       .then(function (resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        // Reject HTML responses for non-.html URLs (web pages misdetected as files)
+        var ct = (resp.headers.get('content-type') || '').toLowerCase();
+        if (!isHtmlUrl && ct.indexOf('text/html') >= 0) {
+          console.log('[Portility] Skipping HTML page response for:', src.substring(0, 80));
+          return null;
+        }
         return resp.blob();
       })
       .then(function (blob) {
+        if (!blob) return null;
         return new Promise(function (resolve) {
           var reader = new FileReader();
           reader.onload = function () { resolve(reader.result); };
@@ -344,7 +361,14 @@
       })
       .catch(function () {
         console.log('[Portility] Same-origin fetch failed for', src.substring(0, 80), '— trying background');
-        return fetchViaBackground(src);
+        return fetchViaBackground(src).then(function (bgDataUrl) {
+          // Reject HTML content from background fetch for non-.html URLs
+          if (!isHtmlUrl && bgDataUrl && /^data:text\/html/i.test(bgDataUrl)) {
+            console.log('[Portility] Skipping HTML background response for:', src.substring(0, 80));
+            return null;
+          }
+          return bgDataUrl;
+        });
       });
   }
 

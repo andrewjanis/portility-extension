@@ -546,6 +546,39 @@
             allAssets = allAssets.concat(turnAssets);
           }
 
+          // Fallback: scan entire conversation scope for images not found in turns.
+          // Claude sometimes renders user-uploaded images in containers outside the
+          // turn elements (e.g. image grid above the text, expanded previews).
+          var seenSrcs = {};
+          for (var si = 0; si < allAssets.length; si++) {
+            if (allAssets[si].url) seenSrcs[allAssets[si].url] = true;
+          }
+          var scopeImgs = scope.querySelectorAll('img');
+          for (var qi = 0; qi < scopeImgs.length; qi++) {
+            var scopeImg = scopeImgs[qi];
+            var imgSrc = scopeImg.src || scopeImg.getAttribute('src') || '';
+            if (!imgSrc || seenSrcs[imgSrc]) continue;
+            if (scopeImg.naturalWidth > 0 && scopeImg.naturalWidth < 20) continue;
+            if (imgSrc.startsWith('data:') && imgSrc.length < 200) continue;
+            if (imgSrc.includes('.svg') && scopeImg.closest('button')) continue;
+            seenSrcs[imgSrc] = true;
+            var scopeFname = 'image_scope_' + qi + '.png';
+            try {
+              var pathParts = new URL(imgSrc).pathname.split('/');
+              var lastPart = pathParts[pathParts.length - 1];
+              if (lastPart && /\.\w{2,5}$/.test(lastPart)) scopeFname = decodeURIComponent(lastPart);
+            } catch (e) {}
+            allAssets.push({
+              type: 'image',
+              url: imgSrc,
+              alt: scopeImg.alt || '',
+              thumbnailUrl: imgSrc,
+              filename: scopeFname,
+              turnIndex: -1,
+              role: 'Unknown',
+            });
+          }
+
           // Claude-specific: scan for artifact references in conversation.
           // Only match top-level artifact containers to avoid duplicates from
           // nested elements. Filter out elements whose parent also matches
