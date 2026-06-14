@@ -11,5 +11,8 @@
 - **Combine /second-opinion + /compare into one call**: Reduce from 3 API calls to 2 per Second Opinion. Saves ~$15 per 1,000 uses but increases prompt complexity.
 - **Truncate inputs to /compare**: Send ~2K tokens each instead of full brief + full second opinion. Saves ~$10 per 1,000 uses.
 
+## Port My Profile
+- **Resume upload**: Allow users to upload a resume (PDF/DOCX) during profile creation. Extract key details (role, skills, industry, experience) to auto-populate profile answers or enrich the generated instruction packet.
+
 ## PMC Pro Downloads
 - **Zip file for image-containing briefs**: When a PMC Pro download includes selected images, produce a `.zip` containing the markdown brief plus the image files, instead of a single `.md` with embedded base64. Smaller file size, easier to share, and images can be opened/previewed independently.

@@ -135,6 +135,34 @@ function generateInstructions(answers) {
     }
   }
 
+  // Legacy handler: old "whatNotToDo" answers from before consolidation.
+  // The section was removed from config, so the normal loop won't process it.
+  if (answers.whatNotToDo) {
+    var legacyWNTD = answers.whatNotToDo;
+    if (typeof legacyWNTD === 'string') { legacyWNTD = [legacyWNTD]; }
+    if (Array.isArray(legacyWNTD) && legacyWNTD.length > 0) {
+      var wntdMap = {
+        'elaborate':   "Don't elaborate on my ideas without being asked.",
+        'assumptions': "Don't make assumptions about what I mean.",
+        'clarifying':  "Don't ask clarifying questions before answering \u2014 just answer.",
+        'formal':      "Don't be overly formal or robotic.",
+        'interrupts':  "Don't interrupt my train of thought.",
+      };
+      var wntdParts = [];
+      for (var w = 0; w < legacyWNTD.length; w++) {
+        if ((legacyWNTD[w] === 'other' || legacyWNTD[w] === 'custom_text') && answers.whatNotToDo_customText) {
+          var wRaw = answers.whatNotToDo_customText.trim();
+          if (wRaw) { wntdParts.push(wRaw); }
+        } else if (wntdMap[legacyWNTD[w]]) {
+          wntdParts.push(wntdMap[legacyWNTD[w]]);
+        }
+      }
+      if (wntdParts.length > 0) {
+        instructions.push(wntdParts.join(' '));
+      }
+    }
+  }
+
   return instructions.join('\n\n');
 }
 

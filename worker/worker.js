@@ -1559,23 +1559,34 @@ async function handleCompare(request, env, corsHeaders) {
 
   var systemPrompt = 'You are a neutral evaluator comparing two AI responses to the same question. ' +
     'Judge only on substantive content — accuracy, completeness, and logical consistency. ' +
-    'Do not consider tone, style, or formatting. ' +
+    'Do not consider tone, style, formatting, or how information is presented. ' +
     'Return JSON only — no preamble, no markdown, no explanation outside the JSON object.\n\n' +
-    'Return this exact JSON structure:\n' +
+    'EXCLUSION RULE: Do not include any agreement or divergence item that describes:\n' +
+    '- How a response is structured or organised\n' +
+    '- How comprehensive or detailed a response is\n' +
+    '- Whether a response offers the user a choice or a single path forward\n' +
+    '- Tone, style, or language approach\n' +
+    '- Any observation about what "both responses do" rather than what they conclude\n' +
+    'Only include items where the models take a position on a factual claim, a diagnosis, a recommendation, a risk assessment, or an analytical conclusion — and either agree or disagree on that position.\n\n' +
+    'TITLE RULE: Titles must name the factual or analytical point directly. ' +
+    'Never begin a title with "Both responses", "Both models", "Each response", or any phrase that describes the AI outputs. ' +
+    'The title should read like a topic heading for the underlying claim.\n' +
+    'CORRECT: "Keypad membrane failure cause" / "DIY repair cost estimate" / "Warranty claim eligibility"\n' +
+    'INCORRECT: "Both responses identify the error cause" / "Both models recommend the same repair"\n\n' +
+    'Return this JSON structure:\n' +
     '{\n' +
     '  "question_type": "factual" | "subjective" | "analytical",\n' +
     '  "agreement_score": <integer 0-100>,\n' +
-    '  "agreements": [{"title": "<string>", "text": "<string>"}, ...],\n' +
-    '  "divergences": [{"title": "<string>", "text": "<string>"}, ...],\n' +
-    '  "interpretation": "<one sentence: what the score means given the question type>"\n' +
+    '  "agreements": [\n' +
+    '    {"title": "<2-5 word noun phrase naming the factual/analytical point>", "text": "<description of what both models agree on>"}\n' +
+    '  ],\n' +
+    '  "divergences": [\n' +
+    '    {"title": "<2-5 word noun phrase naming the factual/analytical point>", "text": "<description of how the models differ>"}\n' +
+    '  ],\n' +
+    '  "interpretation": "<Lead with \'Key question: [the core question being asked].\' Then one sentence on whether the models agree or disagree on the answer to that specific question. Do not describe tone, style, or how information is presented.>"\n' +
     '}\n\n' +
     'Rules:\n' +
     '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
-    '- Provide EXACTLY 3 agreements and 3 divergences\n' +
-    '- "title" must be a specific, descriptive noun phrase (2-5 words) naming the TOPIC being discussed. ' +
-    'Examples: "Error page design approach", "Budget constraints", "Product recommendations", "Implementation timeline", "Wax application method". ' +
-    'NEVER use meta-phrases like "Both responses", "Response A offers", "The next logical step", "Key insight", "Main point". ' +
-    'The title must make sense as a standalone topic label without reading the text.\n' +
     '- "text" should be 1-2 sentences explaining the specific agreement or divergence\n\n' +
     'CRITICAL — Scoring calibration by question type:\n\n' +
     'FACTUAL questions: Score based on whether both responses state the same facts. ' +

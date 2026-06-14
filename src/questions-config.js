@@ -16,12 +16,17 @@ var QUESTIONNAIRE_CONFIG = {
       sections: [
         {
           key: 'communicationStyle',
-          title: 'Things I Like about my AI',
+          title: 'How should your AI communicate?',
           type: 'multi-select',
           options: [
             { value: 'direct', label: 'Direct and concise', instruction: 'Keep responses concise and to the point.' },
             { value: 'detailed', label: 'Detailed and thorough', instruction: 'Provide thorough, detailed explanations.' },
             { value: 'conversational', label: 'Conversational and friendly', instruction: 'Use a warm, conversational tone.' },
+            { value: 'no-elaborate', label: "Don't elaborate without asking", instruction: "Don't elaborate on my ideas without being asked." },
+            { value: 'no-assumptions', label: "Don't make assumptions", instruction: "Don't make assumptions about what I mean." },
+            { value: 'no-clarifying', label: "Don't ask clarifying questions", instruction: "Don't ask clarifying questions before answering \u2014 just answer." },
+            { value: 'no-formal', label: "Don't be overly formal", instruction: "Don't be overly formal or robotic." },
+            { value: 'no-interrupts', label: "Don't interrupt my thinking", instruction: "Don't interrupt my train of thought." },
             { value: 'other', label: 'Other (open text)', customTextPlaceholder: 'Describe your preference...' },
           ],
           // Legacy value mappings (kept for backward compat with old saved answers)
@@ -33,17 +38,28 @@ var QUESTIONNAIRE_CONFIG = {
           },
         },
         {
-          key: 'whatNotToDo',
-          title: 'Things I don\u0027t like about my AI',
+          key: 'primaryUseCase',
+          title: 'What do you mainly use AI for?',
           type: 'multi-select',
-          negateCustomText: true, // auto-prepend "Don't" to custom text
           options: [
-            { value: 'elaborate', label: 'Elaborates without being asked', instruction: "Don't elaborate on my ideas without being asked." },
-            { value: 'assumptions', label: 'Makes assumptions', instruction: "Don't make assumptions about what I mean." },
-            { value: 'clarifying', label: 'Asks clarifying questions', instruction: "Don't ask clarifying questions before answering \u2014 just answer." },
-            { value: 'formal', label: 'Overly formal or robotic', instruction: "Don't be overly formal or robotic." },
-            { value: 'interrupts', label: 'Interrupts my thinking', instruction: "Don't interrupt my train of thought." },
-            { value: 'other', label: 'Other (open text)', customTextPlaceholder: "Describe what you don't like..." },
+            { value: 'writing', label: 'Writing & editing', instruction: 'Help me write, edit, and refine text.' },
+            { value: 'coding', label: 'Coding & development', instruction: 'Help me write, review, and debug code.' },
+            { value: 'research', label: 'Research & analysis', instruction: 'Help me research topics and analyse information.' },
+            { value: 'brainstorming', label: 'Brainstorming & ideation', instruction: 'Help me brainstorm ideas and think creatively.' },
+            { value: 'decisions', label: 'Decision-making', instruction: 'Help me weigh options and make better decisions.' },
+            { value: 'planning', label: 'Planning & organising', instruction: 'Help me plan projects and organise tasks.' },
+            { value: 'other', label: 'Other (open text)', customTextPlaceholder: 'Describe your use case...' },
+          ],
+        },
+        {
+          key: 'expertiseLevel',
+          title: 'Your general expertise level',
+          type: 'single-select-chips',
+          options: [
+            { value: 'novice', label: 'Novice', instruction: 'Explain things simply and avoid jargon. I\'m still learning.' },
+            { value: 'intermediate', label: 'Intermediate', instruction: 'I have a working knowledge — skip the basics but explain advanced concepts.' },
+            { value: 'expert', label: 'Expert', instruction: 'I\'m experienced — be technical and skip introductory explanations.' },
+            { value: 'depends', label: 'It depends', instruction: 'My expertise varies by topic. Ask or adapt based on context.' },
           ],
         },
         {
@@ -54,6 +70,29 @@ var QUESTIONNAIRE_CONFIG = {
             { value: 'casual', label: 'Casual', instruction: 'Keep the conversation casual and relaxed.' },
             { value: 'formal', label: 'Formal', instruction: 'Maintain a professional and formal tone.' },
             { value: 'robotic', label: 'Robotic', instruction: 'Be precise and systematic. Skip pleasantries and emotional language.' },
+          ],
+        },
+        {
+          key: 'taskInitiation',
+          title: 'When you give AI a task, it should...',
+          type: 'single-select-chips',
+          options: [
+            { value: 'dive-in', label: 'Dive right in', instruction: 'Start working on the task immediately without asking preliminary questions.' },
+            { value: 'one-question', label: 'Ask one key question', instruction: 'Ask at most one clarifying question before starting, then get to work.' },
+            { value: 'confirm', label: 'Confirm the plan first', instruction: 'Outline your approach and confirm it with me before starting.' },
+          ],
+        },
+        {
+          key: 'outputFormat',
+          title: 'Preferred output formats',
+          type: 'multi-select',
+          options: [
+            { value: 'prose', label: 'Prose / paragraphs', instruction: 'Default to writing in flowing prose and paragraphs.' },
+            { value: 'bullets', label: 'Bullet points', instruction: 'Use bullet points to organise information clearly.' },
+            { value: 'numbered', label: 'Numbered lists', instruction: 'Use numbered lists for sequential or ranked information.' },
+            { value: 'tables', label: 'Tables', instruction: 'Use tables when comparing options or presenting structured data.' },
+            { value: 'code', label: 'Code blocks', instruction: 'Use code blocks and technical formatting when relevant.' },
+            { value: 'mixed', label: 'Mix it up', instruction: 'Vary the format based on what fits the content best.' },
           ],
         },
         {
@@ -89,7 +128,7 @@ var QUESTIONNAIRE_CONFIG = {
           key: 'otherPreferences',
           title: 'Anything else?',
           type: 'textarea',
-          placeholder: 'Type here, or leave blank...',
+          placeholder: "e.g. 'Always use metric units' / 'I'm not a native English speaker, keep language simple' / 'I'm colourblind — avoid red/green comparisons'",
           instructionPrefix: 'Additional instruction: ',
         },
       ],
