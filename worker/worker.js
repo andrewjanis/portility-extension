@@ -1049,7 +1049,7 @@ export default {
 
 async function handleTrainerChat(request, env, corsHeaders) {
   var body = await request.json();
-  var model = body.model || 'claude-sonnet-4-20250514';
+  var model = body.model || 'claude-sonnet-4-6';
   var messages = body.messages || [];
   var system = body.system || undefined;
   var maxTokens = body.max_tokens || 1000;
@@ -1359,7 +1359,7 @@ async function handleSummarizePro(request, env, corsHeaders) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: [
@@ -1369,10 +1369,10 @@ async function handleSummarizePro(request, env, corsHeaders) {
   });
 
   var data = await response.json();
-  data._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
+  data._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-6');
 
   trackLLMGeneration(env, distinctId, {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     provider: 'anthropic',
     input: [{ role: 'user', content: userContent }],
     outputText: (data.content && data.content[0]) ? data.content[0].text : '',
@@ -1449,7 +1449,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4096,
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages: [
@@ -1468,7 +1468,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
 
     text = (data.content && data.content[0]) ? data.content[0].text : '';
     trackLLMGeneration(env, distinctId, {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       provider: 'anthropic',
       input: [{ role: 'user', content: brief }],
       outputText: text,
@@ -1477,7 +1477,7 @@ async function handleSecondOpinion(request, env, corsHeaders) {
       latencyMs: Date.now() - startTime,
       httpStatus: response.status,
     });
-    return new Response(JSON.stringify({ text: text, source: 'claude', _usage: extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514') }), {
+    return new Response(JSON.stringify({ text: text, source: 'claude', _usage: extractUsage(data, 'anthropic', 'claude-sonnet-4-6') }), {
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
 
@@ -1623,7 +1623,7 @@ async function handleCompare(request, env, corsHeaders) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
       messages: [
@@ -1659,10 +1659,10 @@ async function handleCompare(request, env, corsHeaders) {
     });
   }
 
-  parsed._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-20250514');
+  parsed._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-6');
 
   trackLLMGeneration(env, distinctId, {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     provider: 'anthropic',
     input: [{ role: 'user', content: userContent }],
     outputText: contentText,
