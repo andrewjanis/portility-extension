@@ -475,9 +475,15 @@
             );
             allAssets = allAssets.concat(turnAssets);
           }
+          console.log('[Portility] DOM extraction found', allAssets.length, 'asset(s):', allAssets.map(function (a) {
+            return { type: a.type, role: a.role, filename: a.filename, url: (a.url || '').substring(0, 80), hasDataUrl: !!a.dataUrl };
+          }));
 
           // Detect ChatGPT file attachments via conversation API
           var chatgptFiles = await detectChatGPTFileAttachments();
+          console.log('[Portility] API detection found', chatgptFiles.length, 'file(s):', chatgptFiles.map(function (a) {
+            return { type: a.type, role: a.role, filename: a.filename, hasDataUrl: !!a.dataUrl, fileId: a._fileId };
+          }));
           if (chatgptFiles.length > 0) {
             // Deduplicate: API downloads have full-quality data, so they replace
             // any DOM-extracted asset with the same filename or file ID in URL.
@@ -498,11 +504,15 @@
             allAssets = allAssets.concat(chatgptFiles);
           }
 
+          console.log('[Portility] Final assets before capture:', allAssets.length, allAssets.map(function (a) {
+            return { type: a.type, role: a.role, filename: a.filename, hasDataUrl: !!a.dataUrl };
+          }));
           await window.PortilityShared.captureImageData(allAssets);
 
           // Strip dataUrl from response to avoid message size limits
           // (captured images are stored directly in chrome.storage.local)
           var capturedCount = allAssets.filter(function (a) { return !!a.dataUrl; }).length;
+          console.log('[Portility] After capture:', capturedCount, '/', allAssets.length, 'have dataUrl');
           var responseAssets = allAssets.map(function (a) {
             var copy = { type: a.type, url: a.url, alt: a.alt, filename: a.filename, turnIndex: a.turnIndex, role: a.role };
             if (a.thumbnailUrl && !a.thumbnailUrl.startsWith('data:') && !a.thumbnailUrl.startsWith('blob:')) copy.thumbnailUrl = a.thumbnailUrl;

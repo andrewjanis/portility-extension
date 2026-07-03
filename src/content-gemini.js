@@ -1340,10 +1340,21 @@
               }, delay || 500);
             }
 
+            console.log('[Portility][Gemini] Image paste check:', {
+              hasImages: hasImages,
+              imageCount: images ? images.length : 0,
+              hasShared: !!window.PortilityShared,
+              hasPasteImages: !!(window.PortilityShared && window.PortilityShared.pasteImages),
+              images: images ? images.map(function (img) {
+                return { type: img.type, filename: img.filename, hasDataUrl: !!img.dataUrl, dataUrlLen: img.dataUrl ? img.dataUrl.length : 0 };
+              }) : [],
+            });
+
             if (hasImages && window.PortilityShared && window.PortilityShared.pasteImages) {
               // Split images and non-image files for separate paste calls
               var imageFiles = images.filter(function (f) { return !f.type || f.type === 'image'; });
               var otherFiles = images.filter(function (f) { return f.type && f.type !== 'image'; });
+              console.log('[Portility][Gemini] Splitting:', imageFiles.length, 'image(s),', otherFiles.length, 'other file(s)');
 
               var attachBtn = document.querySelector('button[aria-label="Upload file"]')
                 || document.querySelector('uploader-button button')

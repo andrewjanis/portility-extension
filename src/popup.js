@@ -2275,6 +2275,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (images.length > 0) {
             storagePayload.portility_pending_images = images;
           }
+          console.log('[Portility][Popup] Storing for paste:', {
+            textLen: portContent.length,
+            imageCount: images.length,
+            images: images.map(function (img) {
+              return { type: img.type, filename: img.filename, hasDataUrl: !!img.dataUrl, dataUrlLen: img.dataUrl ? img.dataUrl.length : 0 };
+            }),
+          });
           await new Promise(function (resolve, reject) {
             chrome.storage.local.set(storagePayload, function () {
               if (chrome.runtime.lastError) {
