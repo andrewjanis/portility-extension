@@ -44,7 +44,9 @@
       "Bash(npx eslint:*)",
       "Bash(powershell.exe:*)",
       "Bash(xargs wc:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(pwsh:*)",
+      "Bash(curl.exe:*)"
     ]
   }
 }
