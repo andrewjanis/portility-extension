@@ -1,9 +1,8 @@
 {
   "manifest_version": 3,
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAztwTFHMjXwF0QbcSrBp0g13LIo0epwOD68hM+zZxr6fF76jxlWznSapBOzlmRwRoORBDhqAepB0X0A+xyBpkxhOyHCr7Hw3dPbwccmHuBiXsSyX2imUGuJ7AaY/NW+9/LSQmctTuDqMPWWI48cU0XzoD5gUQjwrhTVRa78tWJbXM/NaVVcfGszxfQuE3ZjIL0FOjT2ezC0m6HG83Bir5+2VC2vcpBGqnnIFXIoUvpcgAaq9ozCiJX1FUu6yUqfOx3Y2oi8I+JhhH/RjdgELPyEThzc0IIGzL4ZOdc6LPqOQFRJFE8N3zya9z5jGxdWJVpi+NKxj6tDOirgW+Tp1XnwIDAQAB",
   "name": "Portility",
-  "version": "1.0.0",
-  "description": "Easily move conversations between AI platforms. Get a second opinion from Claude, ChatGPT, Gemini, or Copilot in one click.",
+  "version": "1.7.0",
+  "description": "Easily move conversations between AI platforms. Get a second opinion from Claude, ChatGPT, or Gemini in one click.",
   "permissions": [
     "activeTab",
     "alarms",
@@ -16,7 +15,6 @@
     "identity"
   ],
   "host_permissions": [
-    "<all_urls>",
     "https://claude.ai/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
@@ -24,12 +22,10 @@
     "https://images.openai.com/*",
     "https://*.blob.core.windows.net/*",
     "https://*.googleusercontent.com/*",
-    "https://copilot.microsoft.com/*",
     "https://app.posthog.com/*",
     "https://*.workers.dev/*",
     "https://firestore.googleapis.com/*",
-    "https://www.googleapis.com/*",
-    "https://login.microsoftonline.com/*"
+    "https://www.googleapis.com/*"
   ],
   "oauth2": {
     "client_id": "542250387353-2tips6sd00uhgt19acl60bilki9hg3ri.apps.googleusercontent.com",
