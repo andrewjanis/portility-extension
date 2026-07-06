@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAztwTFHMjXwF0QbcSrBp0g13LIo0epwOD68hM+zZxr6fF76jxlWznSapBOzlmRwRoORBDhqAepB0X0A+xyBpkxhOyHCr7Hw3dPbwccmHuBiXsSyX2imUGuJ7AaY/NW+9/LSQmctTuDqMPWWI48cU0XzoD5gUQjwrhTVRa78tWJbXM/NaVVcfGszxfQuE3ZjIL0FOjT2ezC0m6HG83Bir5+2VC2vcpBGqnnIFXIoUvpcgAaq9ozCiJX1FUu6yUqfOx3Y2oi8I+JhhH/RjdgELPyEThzc0IIGzL4ZOdc6LPqOQFRJFE8N3zya9z5jGxdWJVpi+NKxj6tDOirgW+Tp1XnwIDAQAB",
   "name": "Portility DEV",
-  "version": "1.6.2",
+  "version": "1.0.0",
   "description": "Easily move conversations between AI platforms. Get a second opinion from Claude, ChatGPT, Gemini, or Copilot in one click.",
   "permissions": [
     "activeTab",

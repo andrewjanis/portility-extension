@@ -125,17 +125,50 @@ window.addEventListener('unhandledrejection', function () {
 });
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
+// Once a user signs in, we identify them to PostHog by Firebase UID so that
+// feature-usage events tie back to a stable person across sessions/devices
+// (enables cohort/retention analysis). Until then, events use the anonymous
+// per-install distinct_id as before.
 async function getDistinctId() {
   return new Promise((resolve) => {
-    chrome.storage.local.get('drewery_distinct_id', (data) => {
-      resolve(data.drewery_distinct_id || 'drewery-popup-unknown');
+    chrome.storage.local.get(['drewery_distinct_id', 'firebase_uid'], (data) => {
+      resolve(data.firebase_uid || data.drewery_distinct_id || 'drewery-popup-unknown');
     });
   });
+}
+
+// Sends a one-time $identify event linking the anonymous distinct_id to the
+// Firebase UID (with email as a person property). Guarded by a stored flag
+// so it only fires once per signed-in user, not on every popup open.
+async function maybeIdentifyUser() {
+  try {
+    const data = await chrome.storage.local.get([
+      'firebase_uid', 'google_login_hint', 'drewery_distinct_id', 'posthog_identified_uid',
+    ]);
+    if (!data.firebase_uid || data.posthog_identified_uid === data.firebase_uid) return;
+    fetch(POSTHOG_HOST + '/capture/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: POSTHOG_API_KEY,
+        event: '$identify',
+        distinct_id: data.firebase_uid,
+        properties: {
+          $set: { email: data.google_login_hint || undefined },
+          $anon_distinct_id: data.drewery_distinct_id,
+        },
+        timestamp: new Date().toISOString(),
+      }),
+      keepalive: true,
+    }).catch(() => {});
+    chrome.storage.local.set({ posthog_identified_uid: data.firebase_uid });
+  } catch (e) { /* non-critical */ }
 }
 
 async function trackEvent(eventName, properties) {
   if (!POSTHOG_API_KEY || POSTHOG_API_KEY === 'INSERT_POSTHOG_API_KEY_HERE') return;
   try {
+    maybeIdentifyUser(); // fire-and-forget, no-ops after the first call per user
     const distinctId = await getDistinctId();
     fetch(POSTHOG_HOST + '/capture/', {
       method: 'POST',
@@ -322,6 +355,41 @@ document.addEventListener('DOMContentLoaded', () => {
     trackEvent('trial_revert_free');
   });
 
+  // ── Marketing consent modal ────────────────────────────────────────────
+  // TODO(betaaccess): onboarding welcome message pending Andrew's copy
+  const consentOverlay = document.getElementById('consentOverlay');
+  const consentCheckbox = document.getElementById('consentCheckbox');
+  const consentContinueBtn = document.getElementById('consentContinueBtn');
+  var CONSENT_SHOWN_KEY = 'consent_shown';
+
+  /**
+   * Show the one-time marketing consent modal after a user's first successful
+   * sign-in, and persist their choice to Firestore. Resolves once the flow is
+   * complete (immediately, if already shown before).
+   * @param {{idToken: string, firebaseUid: string}} auth
+   * @returns {Promise<void>}
+   */
+  function maybeShowConsentModal(auth) {
+    return new Promise(function (resolve) {
+      chrome.storage.local.get(CONSENT_SHOWN_KEY, function (result) {
+        if (result[CONSENT_SHOWN_KEY]) { resolve(); return; }
+        consentOverlay.classList.add('visible');
+        consentContinueBtn.addEventListener('click', function onContinue() {
+          consentContinueBtn.removeEventListener('click', onContinue);
+          consentOverlay.classList.remove('visible');
+          var optIn = consentCheckbox.checked;
+          chrome.storage.local.set({ [CONSENT_SHOWN_KEY]: true });
+          if (auth && auth.idToken && auth.firebaseUid) {
+            saveMarketingOptIn(auth.idToken, auth.firebaseUid, optIn).catch(function (e) {
+              console.warn('[Popup] Failed to save marketing consent:', e.message || e);
+            });
+          }
+          resolve();
+        });
+      });
+    });
+  }
+
   // When a dev tier override is active, substitute the overridden tier's
   // limits into server responses so the popup reflects the selected tier.
   function applyDevTierToResult(result) {
@@ -433,7 +501,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let _imageConfirmResolve = null; // pending promise resolve for image selection
 
   // ── User tier state ───────────────────────────────────────────────────
-  let _userTier = 'free'; // 'free', 'paid', 'paid2', or 'paid3'
+  // BetaAccess launch mode: all authenticated users get Premium-parity access
+  // (tier forced to 'BetaAccess') unless a devTierOverride is explicitly set.
+  // Set to false to revert to normal paid-tier gating (fall re-enable).
+  var BETA_ACCESS_MODE = true;
+  let _userTier = 'free'; // 'free', 'paid', 'paid2', 'paid3', or 'BetaAccess'
   let _devTierOverride = null; // set from devTierOverride storage key
   async function checkUserTier() {
     var result = await new Promise(function (resolve) {
@@ -448,6 +520,15 @@ document.addEventListener('DOMContentLoaded', () => {
       _userTier = result.userTier.tier;
     }
     // else _userTier stays 'free' (the default)
+
+    // BetaAccess override: authenticated users get Premium-parity access,
+    // regardless of Firestore tier, unless a dev override is active.
+    var authCache = await new Promise(function (resolve) {
+      chrome.storage.local.get(['firebase_id_token', 'firebase_uid', 'firebase_token_expiry'], function (d) { resolve(d); });
+    });
+    if (BETA_ACCESS_MODE && !result.devTierOverride && authCache.firebase_id_token && authCache.firebase_uid) {
+      _userTier = 'BetaAccess';
+    }
     applyTierUI();
 
     // Background refresh from Firestore so tier updates after upgrade/downgrade.
@@ -455,17 +536,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // interactive auth popup that would close this popup before the fetch completes.
     if (!result.devTierOverride) {
       try {
-        var authCache = await new Promise(function (resolve) {
-          chrome.storage.local.get(['firebase_id_token', 'firebase_uid', 'firebase_token_expiry'], function (d) { resolve(d); });
-        });
         if (authCache.firebase_id_token && authCache.firebase_uid) {
           console.log('[Popup] Tier refresh: using cached token for uid=' + authCache.firebase_uid);
           var freshTier = await getUserTier(authCache.firebase_id_token, authCache.firebase_uid);
           console.log('[Popup] Firestore tier: cached=' + _userTier + ' fresh=' + freshTier);
-          if (freshTier !== _userTier) {
+          chrome.storage.local.set({ userTier: { tier: freshTier, timestamp: Date.now() } });
+          // While BetaAccess mode is on, the Firestore tier is stored for
+          // bookkeeping but never used for gating — keep _userTier forced.
+          if (BETA_ACCESS_MODE) {
+            _userTier = 'BetaAccess';
+          } else if (freshTier !== _userTier) {
             console.log('[Popup] Tier changed:', _userTier, '→', freshTier);
             _userTier = freshTier;
-            chrome.storage.local.set({ userTier: { tier: freshTier, timestamp: Date.now() } });
           }
           applyTierUI();
         } else {
@@ -487,10 +569,16 @@ document.addEventListener('DOMContentLoaded', () => {
         applyTierUI();
         return;
       }
-      getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
-        _userTier = tier;
-        chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
+      if (BETA_ACCESS_MODE && auth && auth.idToken && auth.firebaseUid) {
+        _userTier = 'BetaAccess';
         applyTierUI();
+      }
+      getUserTier(auth.idToken, auth.firebaseUid).then(function (tier) {
+        chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
+        if (!BETA_ACCESS_MODE) {
+          _userTier = tier;
+          applyTierUI();
+        }
       }).catch(function () {});
     });
   }
@@ -498,7 +586,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyTierUI() {
     console.log('[Popup] User tier:', _userTier);
 
-    if (_userTier === 'paid' || _userTier === 'paid2' || _userTier === 'paid3') {
+    var showPaidUI = _userTier === 'paid' || _userTier === 'paid2' || _userTier === 'paid3' || _userTier === 'BetaAccess';
+    // BetaAccess launch: show premium buttons even pre-login, so the first
+    // click on them is what gates behind OAuth. Dev tier override still
+    // previews Free/Pro/Premium/Unlimited normally (see below).
+    if (BETA_ACCESS_MODE && !_devTierOverride) showPaidUI = true;
+
+    if (showPaidUI) {
       // State 3/4: Pro or Premium — show paid buttons, hide free + upgrade
       if (freeButtonsDiv) freeButtonsDiv.style.display = 'none';
       if (paidButtonsDiv) paidButtonsDiv.style.display = '';
@@ -1085,6 +1179,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Authenticate
       var auth = await ensureAuthenticated();
       refreshTierSilently(auth);
+      await maybeShowConsentModal(auth);
 
       // Usage gating — authorize (no increment yet)
       var usageResult = applyDevTierToResult(await authorizeFeature(auth.idToken, auth.firebaseUid, 'port_me_pro'));
@@ -2761,6 +2856,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       // Usage gating — authorize (no increment yet)
       var auth = await ensureAuthenticated();
+      await maybeShowConsentModal(auth);
       var usageResult = applyDevTierToResult(await authorizeFeature(auth.idToken, auth.firebaseUid, 'port_my_chat_pro'));
       if (!usageResult.allowed) {
         proChatBtn.disabled = false;
@@ -3017,6 +3113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     var soAuth;
     try {
       soAuth = await ensureAuthenticated();
+      await maybeShowConsentModal(soAuth);
       var soUsageResult = applyDevTierToResult(await authorizeFeature(soAuth.idToken, soAuth.firebaseUid, 'second_opinion'));
       if (!soUsageResult.allowed) {
         showUsageBlocked(soUsageResult, 'second_opinion');

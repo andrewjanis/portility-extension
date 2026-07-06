@@ -137,18 +137,26 @@ async function verifyFirebaseIdToken(idToken, firebaseApiKey) {
   return data.users[0].localId;
 }
 
+// ─── BetaAccess launch mode ───────────────────────────────────────────────────
+// When true, all authenticated users get Premium-parity access (tier =
+// 'BetaAccess') unless a devTierOverride is explicitly set. Set to false to
+// revert to normal paid-tier gating (see plan doc for the fall re-enable).
+var BETA_ACCESS_MODE = true;
+
 // ─── Usage tiers ────────────────────────────────────────────────────────────
 var USAGE_TIERS = {
   free:  { limit: Infinity, monthly: false },
   paid:  { limit: 50, monthly: true },
   paid2: { limit: 150, monthly: true },
   paid3: { limit: Infinity, monthly: true },
+  BetaAccess: { limit: Infinity, monthly: false },
 };
 var UPGRADE_URLS = {
   free:  'https://www.portility.ai/pricing',
   paid:  'https://www.portility.ai/pricing',
   paid2: 'https://www.portility.ai/pricing',
   paid3: null,
+  BetaAccess: null,
 };
 
 // Stripe Price ID → tier mapping
@@ -168,7 +176,26 @@ var ENTITLEMENT_MAP = {
   paid:  ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
   paid2: ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
   paid3: ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
+  BetaAccess: ['port_my_chat_pro', 'port_me_pro', 'second_opinion'],
 };
+
+// ─── Rate limiting (anti-fraud / anti-automation) ────────────────────────────
+// Minimal sliding-window counter keyed by firebaseUid, backed by a KV
+// namespace with per-key TTL. Not a general-purpose rate-limiter — just
+// enough to block scripted hammering of /use now that BetaAccess removes
+// usage caps for authenticated users.
+var RATE_LIMIT_MAX_PER_MINUTE = 20;
+async function checkRateLimit(uid, env) {
+  if (!env.RATE_LIMIT_KV) return { limited: false }; // KV not bound — skip silently
+  var minuteBucket = Math.floor(Date.now() / 60000);
+  var key = 'ratelimit:' + uid + ':' + minuteBucket;
+  var current = parseInt((await env.RATE_LIMIT_KV.get(key)) || '0', 10);
+  if (current >= RATE_LIMIT_MAX_PER_MINUTE) {
+    return { limited: true };
+  }
+  await env.RATE_LIMIT_KV.put(key, String(current + 1), { expirationTtl: 90 });
+  return { limited: false };
+}
 
 // ─── JSON response helper ────────────────────────────────────────────────────
 function jsonResponse(status, data, corsHeaders) {
@@ -328,6 +355,13 @@ async function handleUse(request, env, corsHeaders) {
     });
   }
 
+  var rateLimit = await checkRateLimit(claimedUid, env);
+  if (rateLimit.limited) {
+    return new Response(JSON.stringify({ error: 'Too many requests — please slow down.' }), {
+      status: 429, headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
+    });
+  }
+
   // Get service account access token
   var accessToken = await getFirebaseAccessToken(env);
   var docUrl = 'https://firestore.googleapis.com/v1/projects/' +
@@ -349,6 +383,7 @@ async function handleUse(request, env, corsHeaders) {
   if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
     tier = body.tierOverride;
   }
+  if (BETA_ACCESS_MODE && !body.tierOverride) tier = 'BetaAccess';
   var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
   var limit = tierConfig.limit;
 
@@ -587,6 +622,7 @@ async function handleAuthorize(request, env, corsHeaders) {
   if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
     tier = body.tierOverride;
   }
+  if (BETA_ACCESS_MODE && !body.tierOverride) tier = 'BetaAccess';
   var tierConfig = USAGE_TIERS[tier] || USAGE_TIERS.free;
 
   // ── Subscriber path ──
@@ -718,6 +754,7 @@ async function handleRecordUse(request, env, corsHeaders) {
   if (body.tierOverride && USAGE_TIERS[body.tierOverride] && body.tierOverride !== 'paid3') {
     tier = body.tierOverride;
   }
+  if (BETA_ACCESS_MODE && !body.tierOverride) tier = 'BetaAccess';
 
   var commitUrl = 'https://firestore.googleapis.com/v1/projects/' +
     env.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';

@@ -524,6 +524,54 @@
       margin-bottom: 14px;
     }
 
+    /* ── Marketing consent modal ───────────────────────────────────── */
+    #consentOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #consentOverlay.visible {
+      display: flex;
+    }
+
+    #consentModal {
+      background: #fff;
+      border-radius: 10px;
+      padding: 18px 16px;
+      width: 200px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+      text-align: center;
+    }
+
+    #consentModal p {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    #consentCheckboxRow {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      text-align: left;
+      margin-bottom: 14px;
+    }
+
+    #consentCheckboxRow label {
+      font-size: 11px;
+      color: #374151;
+      line-height: 1.4;
+    }
+
     /* ── Usage warning banner ──────────────────────────────────────── */
     #usageWarningBanner {
       position: fixed;
@@ -888,13 +936,13 @@
       </button>
     </div>
 
-    <div id="free-buttons">
+    <div id="free-buttons" style="display:none;">
       <button id="copyBtn" class="btn-primary"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat</button>
       <button id="portInstructionsBtnFree" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port Me</button>
       <button id="upgradeBtn" class="btn-upgrade" style="margin-top:8px;">Upgrade</button>
     </div>
 
-    <div id="paid-buttons" style="display:none;">
+    <div id="paid-buttons">
       <button id="proChatBtn" class="btn-primary"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat Pro</button>
       <button id="portInstructionsBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Profile</button>
       <button id="secondOpinionBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="17" r=".5" fill="#0D9488" stroke="#0D9488"/></svg>Second Opinion</button>
@@ -1079,6 +1127,18 @@
 
   <!-- Usage Warning Banner -->
   <div id="usageWarningBanner" style="display:none;"></div>
+
+  <!-- Marketing Consent Modal -->
+  <div id="consentOverlay">
+    <div id="consentModal">
+      <p>Before you continue — can we keep you posted?</p>
+      <div id="consentCheckboxRow">
+        <input type="checkbox" id="consentCheckbox" checked>
+        <label for="consentCheckbox">Send me occasional offers and updates.</label>
+      </div>
+      <button id="consentContinueBtn" class="modal-btn" style="background:linear-gradient(135deg,#14B8A6,#4ADE80);color:#fff;border:none;">Continue</button>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════════════════════════════════════
        PORT MY CHAT PRO — Review Screen

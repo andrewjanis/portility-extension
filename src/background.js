@@ -83,6 +83,13 @@ const POSTHOG_HOST = 'https://app.posthog.com';
 let _distinctId = null;
 
 async function getDistinctId() {
+  // If the user is signed in, identify events by Firebase UID (stable across
+  // sessions/devices) instead of the anonymous per-install id.
+  try {
+    const authData = await chrome.storage.local.get('firebase_uid');
+    if (authData.firebase_uid) return authData.firebase_uid;
+  } catch (e) { /* fall through to anonymous id */ }
+
   if (_distinctId) return _distinctId;
   try {
     const data = await chrome.storage.local.get('drewery_distinct_id');
@@ -102,11 +109,40 @@ async function getDistinctId() {
   return _distinctId;
 }
 
+// Sends a one-time $identify event linking the anonymous distinct_id to the
+// Firebase UID (with email as a person property). Guarded by a stored flag
+// so it only fires once per signed-in user, not on every event.
+async function maybeIdentifyUser() {
+  try {
+    const data = await chrome.storage.local.get([
+      'firebase_uid', 'google_login_hint', 'drewery_distinct_id', 'posthog_identified_uid',
+    ]);
+    if (!data.firebase_uid || data.posthog_identified_uid === data.firebase_uid) return;
+    fetch(POSTHOG_HOST + '/capture/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: POSTHOG_API_KEY,
+        event: '$identify',
+        distinct_id: data.firebase_uid,
+        properties: {
+          $set: { email: data.google_login_hint || undefined },
+          $anon_distinct_id: data.drewery_distinct_id,
+        },
+        timestamp: new Date().toISOString(),
+      }),
+      keepalive: true,
+    }).catch(() => {});
+    chrome.storage.local.set({ posthog_identified_uid: data.firebase_uid });
+  } catch (e) { /* non-critical */ }
+}
+
 async function trackEvent(eventName, properties) {
   if (!POSTHOG_API_KEY || POSTHOG_API_KEY === 'INSERT_POSTHOG_API_KEY_HERE') {
     return;
   }
   try {
+    maybeIdentifyUser(); // fire-and-forget, no-ops after the first call per user
     const distinctId = await getDistinctId();
     const payload = {
       api_key: POSTHOG_API_KEY,

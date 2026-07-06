@@ -1,3 +1,10 @@
 name = "portility-proxy"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+
+# Anti-fraud rate limiting for /use (BetaAccess launch). Create with:
+#   wrangler kv namespace create RATE_LIMIT_KV
+# then replace the id below with the returned namespace id.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "8e993e88cdd64cd8a6b9d01d9350961e"

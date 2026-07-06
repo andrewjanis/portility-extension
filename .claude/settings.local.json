@@ -27,7 +27,24 @@
       "Bash(xargs grep:*)",
       "WebFetch(domain:app.posthog.com)",
       "Bash(git ls-remote:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(openssl:*)",
+      "Bash(do echo:*)",
+      "Bash(npx wrangler:*)",
+      "Bash(npm init:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:www.npmjs.com)",
+      "mcp__claude_ai_Google_Drive__search_files",
+      "mcp__claude_ai_Google_Drive__read_file_content",
+      "mcp__claude_ai_Google_Drive__create_file",
+      "Bash(pip show:*)",
+      "Bash(do cp:*)",
+      "Bash(npm run:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npx eslint:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(xargs wc:*)",
+      "Bash(sed:*)"
     ]
   }
 }

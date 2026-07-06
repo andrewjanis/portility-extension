@@ -165,18 +165,6 @@ h1 {
   color: #fff;
 }
 
-/* ── Account status ──────────────────────────────────────────────── */
-.account-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.status-dot-gray {
-  background: #d1d5db;
-}
-
 /* ── Primary small button ────────────────────────────────────────── */
 .btn-primary-sm {
   padding: 8px 20px;

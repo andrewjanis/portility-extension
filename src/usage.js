@@ -13,6 +13,7 @@ var USAGE_TIERS = {
   paid:  { limit: 50, monthly: true, label: 'Pro' },
   paid2: { limit: 150, monthly: true, label: 'Premium' },
   paid3: { limit: Infinity, monthly: true, label: 'Unlimited' },
+  BetaAccess: { limit: Infinity, monthly: false, label: 'BetaAccess' },
 };
 
 var UPGRADE_URLS = {
@@ -20,6 +21,7 @@ var UPGRADE_URLS = {
   paid:  'https://www.portility.ai/pricing',
   paid2: 'https://www.portility.ai/pricing',
   paid3: null,
+  BetaAccess: null,
 };
 
 var USAGE_PROJECT_ID = 'portility';

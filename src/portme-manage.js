@@ -13,6 +13,11 @@ document.addEventListener('DOMContentLoaded', function () {
   var backToSettingsBtn = document.getElementById('backToSettingsBtn');
   var _userTier = 'paid'; // default to Pro; updated from storage below
 
+  // BetaAccess launch mode: mirrors the flag in popup.js/worker.js. All
+  // authenticated users get Premium-parity access unless a devTierOverride
+  // is explicitly set. Set to false to revert (fall re-enable).
+  var BETA_ACCESS_MODE = true;
+
   // Questionnaire elements
   var mqPage1Content = document.getElementById('mq-page1-content');
   var mqPage2Content = document.getElementById('mq-page2-content');
@@ -189,8 +194,11 @@ document.addEventListener('DOMContentLoaded', function () {
   // PROFILES (paid only)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
+  chrome.storage.local.get(['devTierOverride', 'userTier', 'firebase_id_token', 'firebase_uid'], function (result) {
     var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
+    if (BETA_ACCESS_MODE && !result.devTierOverride && result.firebase_id_token && result.firebase_uid) {
+      tier = 'BetaAccess';
+    }
     _userTier = tier;
     if (tier === 'free') {
       profilesSection.classList.add('locked-overlay');

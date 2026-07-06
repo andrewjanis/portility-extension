@@ -1,16 +1,27 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', function () {
+  // BetaAccess launch mode: mirrors the flag in popup.js/worker.js. All
+  // authenticated users get Premium-parity access unless a devTierOverride
+  // is explicitly set. Set to false to revert (fall re-enable).
+  var BETA_ACCESS_MODE = true;
+
+  // Resolves the effective tier the same way popup.js does: devTierOverride
+  // wins, then the BetaAccess forced override for authenticated users, then
+  // the last-known Firestore tier cached in storage, then 'free'.
+  function resolveEffectiveTier(result) {
+    if (result.devTierOverride) return result.devTierOverride;
+    if (BETA_ACCESS_MODE && result.firebase_id_token && result.firebase_uid) return 'BetaAccess';
+    return (result.userTier && result.userTier.tier) || 'free';
+  }
+
   var driveBackupToggle = document.getElementById('driveBackupToggle');
   var driveStatus = document.getElementById('driveStatus');
   var driveDisconnectBtn = document.getElementById('driveDisconnectBtn');
   var compressToggle = document.getElementById('compressToggle');
   var managePortMeBtn = document.getElementById('managePortMeBtn');
   var signOutBtn = document.getElementById('signOutBtn');
-  var signInBtn = document.getElementById('signInBtn');
-  var accountSignedIn = document.getElementById('accountSignedIn');
-  var accountSignedOut = document.getElementById('accountSignedOut');
-  var accountEmail = document.getElementById('accountEmail');
+  var accountSection = document.getElementById('accountSection');
 
   // ─── DEV: Tier radio buttons (HIDDEN by default — keep for testing) ─────
   // To show: run document.getElementById('devTierSection').style.display='' in devtools.
@@ -77,9 +88,9 @@ document.addEventListener('DOMContentLoaded', function () {
   var imageQualitySection = document.getElementById('imageQualitySection');
   var portTextModeSection = document.getElementById('portTextModeSection');
 
-  chrome.storage.local.get(['devTierOverride', 'userTier'], function (result) {
-    var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
-    var isPremium = tier === 'paid2' || tier === 'paid3';
+  chrome.storage.local.get(['devTierOverride', 'userTier', 'firebase_id_token', 'firebase_uid'], function (result) {
+    var tier = resolveEffectiveTier(result);
+    var isPremium = tier === 'paid2' || tier === 'paid3' || tier === 'BetaAccess';
     // Text mode and image compression are Premium-only features
     if (!isPremium) {
       [imageQualitySection, portTextModeSection].forEach(function (section) {
@@ -98,10 +109,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ─── Load saved settings ──────────────────────────────────────────────────
   chrome.storage.local.get(
-    ['portility_drive_backup_enabled', 'portility_compress_images', 'devTierOverride', 'userTier'],
+    ['portility_drive_backup_enabled', 'portility_compress_images', 'devTierOverride', 'userTier', 'firebase_id_token', 'firebase_uid'],
     function (result) {
-      var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
-      var isPremium = tier === 'paid2' || tier === 'paid3';
+      var tier = resolveEffectiveTier(result);
+      var isPremium = tier === 'paid2' || tier === 'paid3' || tier === 'BetaAccess';
       if (tier !== 'free') {
         driveBackupToggle.checked = result.portility_drive_backup_enabled === true;
         // Only load saved compress preference for Premium — Pro is locked to OFF (uncompressed)
@@ -179,9 +190,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // ─── Port text mode toggle ──────────────────────────────────────────────
   var portTextModeToggle = document.getElementById('portTextModeToggle');
 
-  chrome.storage.local.get(['portility_pmc_text_mode', 'devTierOverride', 'userTier'], function (result) {
-    var tier = result.devTierOverride || (result.userTier && result.userTier.tier) || 'free';
-    var isPremium = tier === 'paid2' || tier === 'paid3';
+  chrome.storage.local.get(['portility_pmc_text_mode', 'devTierOverride', 'userTier', 'firebase_id_token', 'firebase_uid'], function (result) {
+    var tier = resolveEffectiveTier(result);
+    var isPremium = tier === 'paid2' || tier === 'paid3' || tier === 'BetaAccess';
     // Only load saved text mode for Premium — Pro is locked to OFF (full text)
     if (isPremium) {
       var mode = result.portility_pmc_text_mode || 'full';
@@ -198,32 +209,6 @@ document.addEventListener('DOMContentLoaded', function () {
   if (managePortMeBtn) {
     managePortMeBtn.addEventListener('click', function () {
       chrome.tabs.create({ url: chrome.runtime.getURL('portme-manage.html') });
-    });
-  }
-
-  // ─── Sign in ──────────────────────────────────────────────────────────────
-  signInBtn.addEventListener('click', function () {
-    chrome.identity.getAuthToken({ interactive: true }, function (token) {
-      if (chrome.runtime.lastError) {
-        console.log('[Options] Sign in failed:', chrome.runtime.lastError.message);
-        return;
-      }
-      if (token) {
-        checkAccountStatus();
-        // Refresh tier cache so popup shows correct tier immediately
-        refreshTierFromOptions();
-      }
-    });
-  });
-
-  function refreshTierFromOptions() {
-    ensureAuthenticated().then(function (auth) {
-      return getUserTier(auth.idToken, auth.firebaseUid);
-    }).then(function (tier) {
-      chrome.storage.local.set({ userTier: { tier: tier, timestamp: Date.now() } });
-      console.log('[Options] Tier refreshed:', tier);
-    }).catch(function (e) {
-      console.log('[Options] Tier refresh failed:', e.message || e);
     });
   }
 
@@ -249,45 +234,19 @@ document.addEventListener('DOMContentLoaded', function () {
           'devTierOverride',
         ]);
         hideDriveStatus();
-        showSignedOut();
+        accountSection.style.display = 'none';
       });
     });
   });
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
+  // Note: this checks the Portility sign-in state (firebase_id_token/firebase_uid
+  // from oauth.js's launchWebAuthFlow), NOT chrome.identity.getAuthToken — that's
+  // a separate OAuth client only used for the (currently locked) Drive backup toggle.
   function checkAccountStatus() {
-    chrome.identity.getAuthToken({ interactive: false }, function (token) {
-      if (chrome.runtime.lastError || !token) {
-        showSignedOut();
-        return;
-      }
-      // Fetch user profile to get email
-      fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { Authorization: 'Bearer ' + token }
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (info) {
-          if (info.email) {
-            showSignedIn(info.email);
-          } else {
-            showSignedIn('Signed in');
-          }
-        })
-        .catch(function () {
-          showSignedIn('Signed in');
-        });
+    chrome.storage.local.get(['firebase_id_token', 'firebase_uid'], function (result) {
+      accountSection.style.display = (result.firebase_id_token && result.firebase_uid) ? 'block' : 'none';
     });
-  }
-
-  function showSignedIn(email) {
-    accountEmail.textContent = email;
-    accountSignedIn.style.display = 'block';
-    accountSignedOut.style.display = 'none';
-  }
-
-  function showSignedOut() {
-    accountSignedIn.style.display = 'none';
-    accountSignedOut.style.display = 'block';
   }
 
   function checkDriveStatus() {

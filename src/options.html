@@ -88,7 +88,7 @@
   </div>
 
   <!-- DEV: Tier Toggle — KEEP THIS SECTION, hidden by default. Unhide for testing via devtools: document.getElementById('devTierSection').style.display='' -->
-  <div class="section" id="devTierSection" style="border:2px dashed #f97316;">
+  <div class="section" id="devTierSection" style="border:2px dashed #f97316;display:none;">
     <div class="section-title" style="color:#f97316;">DEV: Tier Override</div>
     <div id="devTierRadios" style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;">
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
@@ -110,25 +110,10 @@
     <div class="section-description">Select a tier for testing. "None" uses the real Firestore tier. Reopen the popup after switching.</div>
   </div>
 
-  <!-- Google Account -->
-  <div class="section">
-    <div class="section-title">Google Account</div>
-    <div id="accountSignedIn" style="display:none;">
-      <div class="account-status">
-        <span class="status-dot"></span>
-        <span id="accountEmail" class="toggle-label"></span>
-      </div>
-      <div class="section-description">Signing out will also disconnect Google Drive.</div>
-      <button id="signOutBtn" class="btn-danger">Sign Out</button>
-    </div>
-    <div id="accountSignedOut" style="display:none;">
-      <div class="account-status">
-        <span class="status-dot status-dot-gray"></span>
-        <span class="toggle-label">Not signed in</span>
-      </div>
-      <div class="section-description">Sign in to enable Google Drive backup and sync.</div>
-      <button id="signInBtn" class="btn-primary-sm">Sign In</button>
-    </div>
+  <!-- Account -->
+  <div class="section" id="accountSection" style="display:none;">
+    <div class="section-title">Account</div>
+    <button id="signOutBtn" class="btn-danger">Log Out</button>
   </div>
 
   <div id="versionLabel" style="text-align:center;font-size:11px;color:#9ca3af;padding:16px 0 8px;"></div>

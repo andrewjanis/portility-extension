@@ -145,6 +145,35 @@ async function getUserTier(idToken, firebaseUid) {
   }
 }
 
+/**
+ * Save the user's marketing consent preference to their Firestore user doc.
+ * Uses updateMask so only this field is touched (doc has other fields like tier).
+ * @param {string} idToken - Firebase ID token
+ * @param {string} firebaseUid - Firebase UID
+ * @param {boolean} optIn
+ * @returns {Promise<void>}
+ */
+async function saveMarketingOptIn(idToken, firebaseUid, optIn) {
+  var url = 'https://firestore.googleapis.com/v1/projects/' + FIRESTORE_PROJECT_ID +
+    '/databases/(default)/documents/users/' + firebaseUid + '?updateMask.fieldPaths=marketing_opt_in';
+
+  var response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': 'Bearer ' + idToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: { marketing_opt_in: { booleanValue: !!optIn } },
+    }),
+  });
+
+  if (!response.ok) {
+    var err = await response.json().catch(function () { return {}; });
+    throw new Error(err.error?.message || 'Failed to save marketing preference');
+  }
+}
+
 async function checkQuestionnaireCompletedRemote(idToken, firebaseUid) {
   try {
     var data = await getInstructionsFromFirestore(idToken, firebaseUid);
