@@ -6,8 +6,11 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;max-width:900px;margin:0 auto;padding:0 24px 32px;color:#111;line-height:1.6}
-    .page-header{padding:20px 0 16px;border-bottom:1px solid #e5e7eb;margin-bottom:20px}
+    .page-header{padding:20px 0 16px;border-bottom:1px solid #e5e7eb;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
     .page-header img{height:32px;width:auto}
+    .help-icon-link{display:inline-flex;align-items:center;color:#9ca3af;transition:color 0.2s;text-decoration:none;line-height:0}
+    .help-icon-link:hover{color:#6b7280}
+    .help-icon-link .help-icon-glyph{display:inline-block;width:16px;height:16px;background-color:currentColor;-webkit-mask:url('icons/help-icon.png') center / contain no-repeat;mask:url('icons/help-icon.png') center / contain no-repeat}
     .score-section{text-align:center;margin-bottom:20px}
     .score-number{font-size:48px;font-weight:700;line-height:1}
     .score-pct{font-size:20px;font-weight:500}
@@ -41,6 +44,7 @@
   <div id="comparisonContent" style="display:none;">
     <div class="page-header">
       <a href="https://portility.ai" target="_blank" rel="noopener"><img src="icons/logo-portility-ai.png" alt="Portility AI"></a>
+      <a class="help-icon-link" href="http://portility.ai/help" target="_blank" rel="noopener" title="Help"><span class="help-icon-glyph"></span></a>
     </div>
     <div class="score-section">
       <span class="score-number" id="scoreNumber"></span>

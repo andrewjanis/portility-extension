@@ -9,7 +9,8 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:#f9fafb;color:#111;padding:0}
-    .header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px}
+    .header{background:#fff;border-bottom:1px solid #e5e7eb;padding:20px 32px;position:relative}
+    .header-help{position:absolute;top:20px;right:32px}
     .header-back{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#6b7280;text-decoration:none;margin-bottom:8px;cursor:pointer;background:none;border:none;font-family:inherit}
     .header-back:hover{color:#0d9488}
     .header h1{font-size:20px;font-weight:700;color:#111}
@@ -84,10 +85,29 @@
     .doc-remove-btn{background:none;border:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:2px}
     .doc-remove-btn:hover{color:#dc2626}
     .doc-hint{font-size:10px;color:#9ca3af;margin-top:4px}
+
+    .help-icon-link {
+      display: inline-flex;
+      align-items: center;
+      color: #9ca3af;
+      transition: color 0.2s;
+      text-decoration: none;
+      line-height: 0;
+    }
+    .help-icon-link:hover { color: #6b7280; }
+    .help-icon-link .help-icon-glyph {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      background-color: currentColor;
+      -webkit-mask: url('icons/help-icon.png') center / contain no-repeat;
+      mask: url('icons/help-icon.png') center / contain no-repeat;
+    }
   </style>
 </head>
 <body>
   <div class="header">
+    <a class="help-icon-link header-help" href="http://portility.ai/help" target="_blank" rel="noopener" title="Help"><span class="help-icon-glyph"></span></a>
     <button id="backToSettingsBtn" class="header-back">&#8592; Back to Settings</button>
     <h1>Manage Port Me</h1>
     <p>View and edit your AI operating instructions and profiles.</p>

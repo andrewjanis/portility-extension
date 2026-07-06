@@ -215,6 +215,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // ─── Sign out ─────────────────────────────────────────────────────────────
   signOutBtn.addEventListener('click', function () {
     chrome.identity.getAuthToken({ interactive: false }, function (token) {
+      if (chrome.runtime.lastError) {
+        console.log('[Options] No cached Drive token to revoke:', chrome.runtime.lastError.message);
+      }
       if (token) {
         // Revoke the token with Google so next sign-in requires re-consent
         fetch('https://accounts.google.com/o/oauth2/revoke?token=' + token)

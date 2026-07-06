@@ -152,6 +152,24 @@
 
     .settings-gear:hover { color: #6b7280; }
 
+    .help-icon-link {
+      display: inline-flex;
+      align-items: center;
+      color: #9ca3af;
+      transition: color 0.2s;
+      text-decoration: none;
+      line-height: 0;
+    }
+    .help-icon-link:hover { color: #6b7280; }
+    .help-icon-link .help-icon-glyph {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      background-color: currentColor;
+      -webkit-mask: url('icons/help-icon.png') center / contain no-repeat;
+      mask: url('icons/help-icon.png') center / contain no-repeat;
+    }
+
     .link-btn {
       background: none;
       border: none;
@@ -931,9 +949,12 @@
   <div id="screen1">
     <div class="popup-header">
       <a href="https://portility.ai" target="_blank" rel="noopener"><img src="icons/logo-horizontal.png" alt="Portility" style="width:120px;height:auto;"></a>
-      <button id="settingsGearBtn" class="settings-gear" title="Settings">
-        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.062 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"/></svg>
-      </button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <a class="help-icon-link" href="http://portility.ai/help" target="_blank" rel="noopener" title="Help"><span class="help-icon-glyph"></span></a>
+        <button id="settingsGearBtn" class="settings-gear" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.062 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"/></svg>
+        </button>
+      </div>
     </div>
 
     <div id="free-buttons" style="display:none;">
@@ -953,7 +974,6 @@
     <div class="footer-links">
       <button id="bugBtn" class="link-btn">Report a Bug</button>
       <button id="featureBtn" class="link-btn">Request a Feature</button>
-      <button id="loginBtn" class="link-btn">Create a Free Account</button>
     </div>
     <div id="bugStatus"></div>
 
