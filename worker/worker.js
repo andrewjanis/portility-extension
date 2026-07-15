@@ -2002,17 +2002,21 @@ async function handleCompare(request, env, corsHeaders) {
     'TITLE RULE: Titles must name the factual or analytical point directly. ' +
     'Never begin a title with "Both responses", "Both models", "Each response", or any phrase that describes the AI outputs. ' +
     'The title should read like a topic heading for the underlying claim.\n' +
+    'Titles must use concrete, specific vocabulary that appears (or nearly appears) verbatim in the source text — favor exact nouns, names, numbers, and terms from the conversation over generic category words like "cost", "strategy", "management", "assessment", or "recommendation" used alone.\n' +
+    'Every title in the same response must be lexically distinct: do not reuse the same key noun/topic word across more than one title, even for related sub-points — merge related points into a single item instead of splitting them into titles that share vocabulary.\n' +
     'CORRECT: "Keypad membrane failure cause" / "DIY repair cost estimate" / "Warranty claim eligibility"\n' +
-    'INCORRECT: "Both responses identify the error cause" / "Both models recommend the same repair"\n\n' +
+    'CORRECT (specific, non-overlapping, on a pet-cost topic): "Spay/neuter one-time expense" / "Emergency vet bill unpredictability" / "Pet insurance premium tradeoff"\n' +
+    'INCORRECT: "Both responses identify the error cause" / "Both models recommend the same repair"\n' +
+    'INCORRECT (generic, overlapping across rows): "Annual cost range" / "First-year cost elevation" / "Cost management strategy" — all reuse "cost" with no distinguishing specific noun\n\n' +
     'Return this JSON structure:\n' +
     '{\n' +
     '  "question_type": "factual" | "subjective" | "analytical",\n' +
     '  "agreement_score": <integer 0-100>,\n' +
     '  "agreements": [\n' +
-    '    {"title": "<2-5 word noun phrase naming the factual/analytical point>", "text": "<description of what both models agree on>"}\n' +
+    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of what both models agree on>"}\n' +
     '  ],\n' +
     '  "divergences": [\n' +
-    '    {"title": "<2-5 word noun phrase naming the factual/analytical point>", "text": "<description of how the models differ>"}\n' +
+    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of how the models differ>"}\n' +
     '  ],\n' +
     '  "interpretation": "<Lead with \'Key question: [the core question being asked].\' Then one sentence on whether the models agree or disagree on the answer to that specific question. Do not describe tone, style, or how information is presented.>"\n' +
     '}\n\n' +
