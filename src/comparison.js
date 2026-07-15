@@ -36,25 +36,73 @@
     return { title: titleText, summary: text };
   }
 
-  function soFindRelevantQuote(text, topic) {
-    if (!text || !topic) return '';
-    var keywords = topic.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3; });
-    if (keywords.length === 0) return '';
-    var sentences = text.split(/[.!?\n]+/).filter(function (s) { return s.trim().length > 15; });
-    var best = '';
-    var bestScore = 0;
-    for (var i = 0; i < sentences.length; i++) {
-      var lower = sentences[i].toLowerCase();
-      var score = 0;
-      for (var k = 0; k < keywords.length; k++) {
-        if (lower.indexOf(keywords[k]) !== -1) score++;
+  // Generic words that cause false-positive keyword overlap across unrelated
+  // theme rows (e.g. "cost", "annual", "strategy" appear in many titles).
+  var SO_STOPWORDS = {
+    'this': 1, 'that': 1, 'these': 1, 'those': 1, 'with': 1, 'from': 1, 'have': 1,
+    'will': 1, 'your': 1, 'their': 1, 'there': 1, 'about': 1, 'which': 1, 'would': 1,
+    'could': 1, 'should': 1, 'when': 1, 'while': 1, 'into': 1, 'than': 1, 'then': 1,
+    'also': 1, 'were': 1, 'been': 1, 'being': 1, 'does': 1, 'each': 1, 'more': 1,
+    'most': 1, 'some': 1, 'such': 1, 'only': 1, 'over': 1, 'under': 1, 'both': 1,
+    'like': 1, 'here': 1, 'where': 1, 'what': 1, 'they': 1, 'them': 1, 'annual': 1,
+    'general': 1, 'overall': 1, 'range': 1, 'cost': 1, 'costs': 1, 'strategy': 1,
+    'recommendation': 1, 'level': 1, 'management': 1, 'elevation': 1,
+  };
+
+  function soExtractKeywords(str) {
+    if (!str) return [];
+    return str.toLowerCase().split(/\W+/).filter(function (w) {
+      return w.length > 3 && !SO_STOPWORDS[w];
+    });
+  }
+
+  // Finds the sentence in `text` most relevant to a theme's title/summary.
+  // Title keywords are weighted higher (more specific signal) than summary
+  // keywords, the score is normalized by sentence length so long sentences
+  // don't win purely by containing more incidental matches, and
+  // `usedSentences` (a Set, tracked per-column across all theme rows) is used
+  // to avoid picking the same quote for multiple unrelated rows.
+  function soFindRelevantQuote(text, title, summary, usedSentences) {
+    if (!text || !title) return '';
+    var titleWords = soExtractKeywords(title);
+    var summaryWords = soExtractKeywords(summary);
+    if (titleWords.length === 0 && summaryWords.length === 0) return '';
+
+    var sentences = text.split(/[.!?\n]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return s.length > 15; });
+
+    function pickBest(excludeUsed) {
+      var best = '';
+      var bestScore = 0;
+      for (var i = 0; i < sentences.length; i++) {
+        var s = sentences[i];
+        if (excludeUsed && usedSentences && usedSentences.has(s)) continue;
+        var lower = s.toLowerCase();
+        var score = 0;
+        for (var k = 0; k < titleWords.length; k++) {
+          if (lower.indexOf(titleWords[k]) !== -1) score += 2;
+        }
+        for (var j = 0; j < summaryWords.length; j++) {
+          if (lower.indexOf(summaryWords[j]) !== -1) score += 1;
+        }
+        if (score === 0) continue;
+        var normalized = score / Math.sqrt(s.length);
+        if (normalized > bestScore) {
+          bestScore = normalized;
+          best = s;
+        }
       }
-      if (score > bestScore) {
-        bestScore = score;
-        best = sentences[i].trim();
-      }
+      return best;
     }
+
+    // Prefer a sentence not already used for another row; if every scoring
+    // candidate has been used, fall back to allowing reuse rather than
+    // showing "No specific mention found."
+    var best = pickBest(true) || pickBest(false);
     if (!best) return '';
+    if (usedSentences) usedSentences.add(best);
+
     best = best.replace(/\*\*/g, '').replace(/^#+\s*/, '').replace(/^[-*]\s+/, '');
     if (best.length > 180) best = best.substring(0, 177) + '...';
     return best;
@@ -109,12 +157,14 @@
     });
     var themes = allPoints.slice(0, 5);
 
+    var usedSentences1 = new Set();
+    var usedSentences2 = new Set();
     var rowsHtml = themes.map(function (item) {
       var parts = item.title
         ? { title: item.title, summary: item.text }
         : soSplitTitleBody(item.text);
-      var q1 = soFindRelevantQuote(d.originalBrief, parts.title);
-      var q2 = soFindRelevantQuote(d.secondOpinion, parts.title);
+      var q1 = soFindRelevantQuote(d.originalBrief, parts.title, parts.summary, usedSentences1);
+      var q2 = soFindRelevantQuote(d.secondOpinion, parts.title, parts.summary, usedSentences2);
       var tagColor = item.type === 'agree' ? '#16a34a' : '#dc2626';
       var tagBg = item.type === 'agree' ? '#f0fdf4' : '#fef2f2';
       var tagLabel = item.type === 'agree' ? 'Agree' : 'Differ';
