@@ -120,13 +120,14 @@
    * @param {{ role: string, text: string }[]} messages
    * @returns {string}
    */
-  function formatConversation(messages) {
-    var HEADER = (typeof PORT_MY_CHAT_PROMPTS !== 'undefined' && PORT_MY_CHAT_PROMPTS.header)
-      ? PORT_MY_CHAT_PROMPTS.header
-      : 'The following is a previous conversation from another AI assistant. Treat it as shared context. In your first response, briefly confirm what you understand the conversation to be about, then propose the most logical next step and ask the user if they\'d like to proceed with that or go in a different direction.\n\n---\n\n';
+  function formatConversation(messages, includeHeader) {
     const body = messages
       .map(function(item) { return item.role + ': ' + item.text; })
       .join('\n\n');
+    if (includeHeader === false) return body;
+    var HEADER = (typeof PORT_MY_CHAT_PROMPTS !== 'undefined' && PORT_MY_CHAT_PROMPTS.header)
+      ? PORT_MY_CHAT_PROMPTS.header
+      : 'The following is a previous conversation from another AI assistant. Treat it as shared context. In your first response, briefly confirm what you understand the conversation to be about, then propose the most logical next step and ask the user if they\'d like to proceed with that or go in a different direction.\n\n---\n\n';
     return HEADER + body;
   }
 

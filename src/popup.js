@@ -3119,7 +3119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Step 2: Extract conversation from the page
       var extractResponse = await new Promise(function (resolve, reject) {
-        chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO' }, function (resp) {
+        chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PRO', skipHeader: true }, function (resp) {
           if (chrome.runtime.lastError) {
             reject(new Error('This website is not supported. Try porting from an AI chat.'));
             return;

@@ -1207,7 +1207,7 @@
             return copy;
           });
 
-          var formatted = formatConversation(messages);
+          var formatted = formatConversation(messages, !message.skipHeader);
           sendResponse({
             success: true,
             messageCount: messages.length,
