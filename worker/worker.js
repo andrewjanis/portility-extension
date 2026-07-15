@@ -999,6 +999,29 @@ async function handleAdminCalibrationRules(request, env, corsHeaders) {
   return jsonResponse(200, { ok: true, config: config }, corsHeaders);
 }
 
+async function handleAdminSecondOpinionPrompt(request, env, corsHeaders) {
+  if (!adminAuthorized(request, env)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
+  }
+  if (!env.CALIBRATION_KV) {
+    return jsonResponse(500, { error: 'CALIBRATION_KV not bound' }, corsHeaders);
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return jsonResponse(400, { error: 'Invalid JSON' }, corsHeaders);
+  }
+  if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
+    return jsonResponse(400, { error: 'prompt is required' }, corsHeaders);
+  }
+
+  var config = await getCalibrationConfig(env);
+  config.secondOpinionPrompt = body.prompt;
+
+  await env.CALIBRATION_KV.put('calibration:config', JSON.stringify(config));
+  return jsonResponse(200, { ok: true, config: config }, corsHeaders);
+}
+
 function buildAdminHtml() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1027,6 +1050,12 @@ function buildAdminHtml() {
   <h1>Second Opinion — Feedback Review</h1>
   <p class="muted">Rows flagged in red look like the AI score disagreed with the human rating.</p>
   <div id="feedback-list">Loading...</div>
+
+  <h2>Second Opinion Generation Prompt</h2>
+  <p class="muted">This text instructs the second AI model that reviews the brief and produces the second-opinion text, before it ever reaches /compare.</p>
+  <textarea id="second-opinion-textarea"></textarea>
+  <br><br>
+  <button id="save-second-opinion">Save Second Opinion Prompt</button>
 
   <h2>Scoring Calibration Rules</h2>
   <p class="muted">This text feeds the FACTUAL / ANALYTICAL / SUBJECTIVE calibration bands used by every /compare call.</p>
@@ -1113,6 +1142,7 @@ function buildAdminHtml() {
     }
     renderTable(data.items || []);
     document.getElementById('rules-textarea').value = (data.calibration && data.calibration.rules) || '';
+    document.getElementById('second-opinion-textarea').value = (data.calibration && data.calibration.secondOpinionPrompt) || '';
   }).catch(function (e) {
     document.getElementById('feedback-list').textContent = 'Error: ' + e.message;
   });
@@ -1125,6 +1155,19 @@ function buildAdminHtml() {
       body: JSON.stringify({ rules: rules }),
     }).then(function (r) { return r.json(); }).then(function (r) {
       document.getElementById('status').textContent = r.ok ? 'Rules saved.' : ('Error: ' + (r.error || 'unknown'));
+    }).catch(function (e) {
+      document.getElementById('status').textContent = 'Error: ' + e.message;
+    });
+  });
+
+  document.getElementById('save-second-opinion').addEventListener('click', function () {
+    var promptText = document.getElementById('second-opinion-textarea').value;
+    fetch(withKey('/admin/second-opinion-prompt'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptText }),
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      document.getElementById('status').textContent = r.ok ? 'Second opinion prompt saved.' : ('Error: ' + (r.error || 'unknown'));
     }).catch(function (e) {
       document.getElementById('status').textContent = 'Error: ' + e.message;
     });
@@ -1337,6 +1380,8 @@ export default {
         return await handleAdminPromoteCalibration(request, env, corsHeaders);
       } else if (path === '/admin/calibration-rules') {
         return await handleAdminCalibrationRules(request, env, corsHeaders);
+      } else if (path === '/admin/second-opinion-prompt') {
+        return await handleAdminSecondOpinionPrompt(request, env, corsHeaders);
       } else if (path === '/trainer-chat') {
         return await handleTrainerChat(request, env, corsHeaders);
       } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
@@ -1717,7 +1762,8 @@ async function handleSecondOpinion(request, env, corsHeaders) {
       brief.substring(brief.length - keepEnd);
   }
 
-  var systemPrompt = 'You are reviewing a project brief generated from a conversation on a different AI platform. Analyze independently: soundness of conclusions, risks/gaps/blind spots, alternative approaches, priority assessment.';
+  var calibrationConfig = await getCalibrationConfig(env);
+  var systemPrompt = calibrationConfig.secondOpinionPrompt;
 
   var briefText = 'Here is the project brief to review:\n\n' + brief;
 
@@ -1877,6 +1923,23 @@ var DEFAULT_CALIBRATION_EXAMPLES = [
   { questionType: 'subjective', title: 'Philosophical exploration of free will', note: 'Both models advocated compatible positions with aligned reasoning and values.', correctScore: 100 },
 ];
 
+// Instructs the "second AI" (handleSecondOpinion) that reviews the project
+// brief and produces the text that later gets scored by handleCompare. Written
+// to push the model toward independent, comparably-structured conclusions —
+// so /compare has clear positions to line up against the original brief,
+// rather than vague commentary about the brief itself.
+var DEFAULT_SECOND_OPINION_PROMPT =
+  'You are an independent analyst providing a second opinion on a project brief summarizing a conversation from a different AI platform. ' +
+  'Your job is to independently answer the same underlying question(s) the original conversation was addressing — not to critique the brief\'s writing, structure, or thoroughness.\n\n' +
+  'Requirements for your response:\n' +
+  '- Take a clear, direct position on every substantive point in the brief: facts, diagnoses, recommendations, risk assessments, and analytical conclusions. State your own conclusion on each, even where you agree with the original — restate it in your own words with your own reasoning rather than only judging whether the original was right.\n' +
+  '- Be specific. Name concrete facts, numbers, causes, mechanisms, and recommendations. Avoid vague generalities or hedged language that cannot be directly compared against the original.\n' +
+  '- Explicitly flag any fact, assumption, or conclusion in the brief that you believe is incomplete, incorrect, or debatable, and explain why in concrete terms.\n' +
+  '- Cover the same core topics and questions the brief covers — do not skip major points, since an incomplete second opinion cannot be fairly compared.\n' +
+  '- Do not comment on tone, formatting, structure, or how comprehensive the original response was. Focus entirely on substance.\n' +
+  '- Do not write primarily in terms of "the brief states" or "the AI recommended" — write as if answering the original question yourself, informed by what you read.\n\n' +
+  'Analyze independently: soundness of conclusions, risks/gaps/blind spots, alternative approaches, and priority assessment.';
+
 // Reads calibration:config from CALIBRATION_KV; falls back to hardcoded defaults
 // if unset, unbound, or unreachable. Never throws.
 async function getCalibrationConfig(env) {
@@ -1887,13 +1950,14 @@ async function getCalibrationConfig(env) {
         return {
           rules: stored.rules || DEFAULT_CALIBRATION_RULES,
           examples: (stored.examples && stored.examples.length) ? stored.examples : DEFAULT_CALIBRATION_EXAMPLES,
+          secondOpinionPrompt: stored.secondOpinionPrompt || DEFAULT_SECOND_OPINION_PROMPT,
         };
       }
     }
   } catch (e) {
     // KV outage — fall through to defaults below.
   }
-  return { rules: DEFAULT_CALIBRATION_RULES, examples: DEFAULT_CALIBRATION_EXAMPLES };
+  return { rules: DEFAULT_CALIBRATION_RULES, examples: DEFAULT_CALIBRATION_EXAMPLES, secondOpinionPrompt: DEFAULT_SECOND_OPINION_PROMPT };
 }
 
 function buildCalibrationSections(config) {
