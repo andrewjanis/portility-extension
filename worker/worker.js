@@ -17,6 +17,11 @@ import Stripe from 'stripe';
  *   FIREBASE_PROJECT_ID   — Firebase project ID (e.g. 'portility')
  *   FIREBASE_SA_EMAIL     — Service account client_email from JSON key
  *   FIREBASE_SA_KEY       — Service account private_key from JSON key (PEM format)
+ *   ADMIN_SECRET          — key required as ?key= on /admin* routes (internal feedback/calibration tool)
+ *
+ * KV namespaces (see wrangler.toml):
+ *   RATE_LIMIT_KV    — anti-fraud rate limiting for /use
+ *   CALIBRATION_KV   — tunable Second Opinion scoring rules/examples, edited via /admin
  */
 
 // ─── PostHog LLM generation tracking ────────────────────────────────────────
@@ -879,6 +884,257 @@ async function handleFeedback(request, env, corsHeaders) {
   });
 }
 
+// ─── /admin* — internal Second Opinion feedback review + calibration tuning ──
+// Key-based auth only (no Firebase sign-in flow): all routes require ?key=
+// matching the ADMIN_SECRET Worker secret. Solo-admin internal tool, not
+// exposed anywhere in src/ (the packaged Chrome extension).
+function adminAuthorized(request, env) {
+  var url = new URL(request.url);
+  return !!env.ADMIN_SECRET && url.searchParams.get('key') === env.ADMIN_SECRET;
+}
+
+function handleAdminPage(request, env, corsHeaders) {
+  if (!adminAuthorized(request, env)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
+  }
+  return new Response(buildAdminHtml(), {
+    headers: Object.assign({ 'Content-Type': 'text/html; charset=utf-8' }, corsHeaders),
+  });
+}
+
+async function handleAdminFeedback(request, env, corsHeaders) {
+  if (!adminAuthorized(request, env)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
+  }
+
+  var accessToken = await getFirebaseAccessToken(env);
+  var baseUrl = 'https://firestore.googleapis.com/v1/projects/' +
+    env.FIREBASE_PROJECT_ID + '/databases/(default)/documents/second_opinion_feedback';
+
+  var docs = [];
+  var pageToken = '';
+  do {
+    var pagedUrl = baseUrl + '?pageSize=300' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    var resp = await fetch(pagedUrl, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if (!resp.ok) {
+      var errText = await resp.text();
+      return jsonResponse(resp.status, { error: 'Firestore list failed: ' + errText }, corsHeaders);
+    }
+    var data = await resp.json();
+    docs = docs.concat(data.documents || []);
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+
+  var items = docs.map(function (doc) {
+    var f = doc.fields || {};
+    return {
+      id: doc.name.split('/').pop(),
+      firebaseUid: f.firebaseUid ? f.firebaseUid.stringValue : '',
+      platform: f.platform ? f.platform.stringValue : '',
+      comparisonModel: f.comparisonModel ? f.comparisonModel.stringValue : '',
+      aiScore: f.aiScore ? parseInt(f.aiScore.integerValue, 10) : 0,
+      humanRating: f.humanRating ? f.humanRating.stringValue : '',
+      humanReason: f.humanReason ? f.humanReason.stringValue : '',
+      originalBrief: f.originalBrief ? f.originalBrief.stringValue : '',
+      secondOpinion: f.secondOpinion ? f.secondOpinion.stringValue : '',
+      questionType: f.questionType ? f.questionType.stringValue : 'analytical',
+      createdAt: f.createdAt ? f.createdAt.timestampValue : '',
+    };
+  });
+
+  items.sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+
+  var calibrationConfig = await getCalibrationConfig(env);
+  return jsonResponse(200, { items: items, calibration: calibrationConfig }, corsHeaders);
+}
+
+async function handleAdminPromoteCalibration(request, env, corsHeaders) {
+  if (!adminAuthorized(request, env)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
+  }
+  if (!env.CALIBRATION_KV) {
+    return jsonResponse(500, { error: 'CALIBRATION_KV not bound' }, corsHeaders);
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return jsonResponse(400, { error: 'Invalid JSON' }, corsHeaders);
+  }
+  if (!body.questionType || !body.title || body.correctScore === undefined || body.correctScore === null) {
+    return jsonResponse(400, { error: 'questionType, title, and correctScore are required' }, corsHeaders);
+  }
+
+  var config = await getCalibrationConfig(env);
+  config.examples = config.examples.concat([{
+    questionType: String(body.questionType),
+    title: String(body.title),
+    note: String(body.note || ''),
+    correctScore: Number(body.correctScore),
+  }]);
+
+  await env.CALIBRATION_KV.put('calibration:config', JSON.stringify(config));
+  return jsonResponse(200, { ok: true, config: config }, corsHeaders);
+}
+
+async function handleAdminCalibrationRules(request, env, corsHeaders) {
+  if (!adminAuthorized(request, env)) {
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
+  }
+  if (!env.CALIBRATION_KV) {
+    return jsonResponse(500, { error: 'CALIBRATION_KV not bound' }, corsHeaders);
+  }
+
+  var body;
+  try { body = await request.json(); } catch (e) {
+    return jsonResponse(400, { error: 'Invalid JSON' }, corsHeaders);
+  }
+  if (typeof body.rules !== 'string' || !body.rules.trim()) {
+    return jsonResponse(400, { error: 'rules is required' }, corsHeaders);
+  }
+
+  var config = await getCalibrationConfig(env);
+  config.rules = body.rules;
+
+  await env.CALIBRATION_KV.put('calibration:config', JSON.stringify(config));
+  return jsonResponse(200, { ok: true, config: config }, corsHeaders);
+}
+
+function buildAdminHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Second Opinion Admin</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; background: #0f1115; color: #e6e6e6; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 40px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  th, td { border: 1px solid #333; padding: 6px 8px; font-size: 13px; vertical-align: top; text-align: left; }
+  th { background: #1a1d24; position: sticky; top: 0; }
+  tr.flagged { background: #3a1f1f; }
+  td.score { font-weight: 600; }
+  details summary { cursor: pointer; color: #8ab4f8; }
+  details pre { white-space: pre-wrap; max-width: 480px; max-height: 240px; overflow: auto; background: #1a1d24; padding: 6px; }
+  button { background: #2d63c8; color: #fff; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #3f78e0; }
+  textarea { width: 100%; height: 260px; background: #1a1d24; color: #e6e6e6; border: 1px solid #333; padding: 8px; font-family: monospace; font-size: 12px; box-sizing: border-box; }
+  #status { margin-top: 8px; font-size: 13px; color: #8ab4f8; }
+  .muted { color: #999; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Second Opinion — Feedback Review</h1>
+  <p class="muted">Rows flagged in red look like the AI score disagreed with the human rating.</p>
+  <div id="feedback-list">Loading...</div>
+
+  <h2>Scoring Calibration Rules</h2>
+  <p class="muted">This text feeds the FACTUAL / ANALYTICAL / SUBJECTIVE calibration bands used by every /compare call.</p>
+  <textarea id="rules-textarea"></textarea>
+  <br><br>
+  <button id="save-rules">Save Rules</button>
+  <div id="status"></div>
+
+<script>
+(function () {
+  var key = new URLSearchParams(window.location.search).get('key') || '';
+
+  function withKey(path) {
+    return path + (path.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(key);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function isFlagged(item) {
+    var rating = (item.humanRating || '').toLowerCase();
+    var score = item.aiScore || 0;
+    if (rating === 'low' && score > 70) return true;
+    if (rating === 'high' && score < 40) return true;
+    return false;
+  }
+
+  function promote(item) {
+    var correctScore = window.prompt('Corrected score (0-100) for this example:', item.aiScore || '');
+    if (correctScore === null || correctScore === '') return;
+    var note = window.prompt('Short note explaining the correct scoring (used as calibration guidance):', item.humanReason || '');
+    if (note === null) return;
+    var title = (item.originalBrief || '').replace(/\\s+/g, ' ').trim().slice(0, 70) || (item.platform + ' feedback');
+    fetch(withKey('/admin/promote-calibration'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questionType: item.questionType || 'analytical',
+        title: title,
+        note: note,
+        correctScore: Number(correctScore),
+      }),
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      document.getElementById('status').textContent = r.ok ? 'Promoted to calibration examples.' : ('Error: ' + (r.error || 'unknown'));
+    }).catch(function (e) {
+      document.getElementById('status').textContent = 'Error: ' + e.message;
+    });
+  }
+
+  function renderTable(items) {
+    var rows = items.map(function (item, i) {
+      var flagCls = isFlagged(item) ? ' class="flagged"' : '';
+      return '<tr' + flagCls + '>' +
+        '<td>' + esc((item.createdAt || '').slice(0, 19).replace('T', ' ')) + '</td>' +
+        '<td>' + esc(item.platform) + '</td>' +
+        '<td>' + esc(item.questionType) + '</td>' +
+        '<td class="score">' + esc(item.aiScore) + '</td>' +
+        '<td>' + esc(item.humanRating) + '</td>' +
+        '<td>' + esc(item.humanReason) + '</td>' +
+        '<td><details><summary>brief</summary><pre>' + esc(item.originalBrief) + '</pre></details>' +
+        '<details><summary>second opinion</summary><pre>' + esc(item.secondOpinion) + '</pre></details></td>' +
+        '<td><button data-idx="' + i + '">Promote to calibration example</button></td>' +
+        '</tr>';
+    }).join('');
+
+    document.getElementById('feedback-list').innerHTML = items.length
+      ? ('<table><thead><tr>' +
+        '<th>Created</th><th>Platform</th><th>Type</th><th>AI Score</th><th>Human</th><th>Reason</th><th>Content</th><th></th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>')
+      : '<p class="muted">No feedback submitted yet.</p>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('button[data-idx]'), function (btn) {
+      btn.addEventListener('click', function () {
+        promote(items[Number(btn.getAttribute('data-idx'))]);
+      });
+    });
+  }
+
+  fetch(withKey('/admin/feedback')).then(function (r) { return r.json(); }).then(function (data) {
+    if (data.error) {
+      document.getElementById('feedback-list').textContent = 'Error: ' + data.error;
+      return;
+    }
+    renderTable(data.items || []);
+    document.getElementById('rules-textarea').value = (data.calibration && data.calibration.rules) || '';
+  }).catch(function (e) {
+    document.getElementById('feedback-list').textContent = 'Error: ' + e.message;
+  });
+
+  document.getElementById('save-rules').addEventListener('click', function () {
+    var rules = document.getElementById('rules-textarea').value;
+    fetch(withKey('/admin/calibration-rules'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: rules }),
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      document.getElementById('status').textContent = r.ok ? 'Rules saved.' : ('Error: ' + (r.error || 'unknown'));
+    }).catch(function (e) {
+      document.getElementById('status').textContent = 'Error: ' + e.message;
+    });
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
 async function handleStripeWebhook(request, env) {
   const stripe = new Stripe(env.STRIPE_SECRET_KEY);
   const body = await request.text();
@@ -1041,6 +1297,15 @@ export default {
       return handleConfig(corsHeaders);
     }
 
+    // GET /admin, GET /admin/feedback — internal feedback review + calibration
+    // tuning tool, key-based auth, no Chrome extension involvement.
+    if (request.method === 'GET' && url.pathname === '/admin') {
+      return handleAdminPage(request, env, corsHeaders);
+    }
+    if (request.method === 'GET' && url.pathname === '/admin/feedback') {
+      return await handleAdminFeedback(request, env, corsHeaders);
+    }
+
     if (request.method !== 'POST') {
       return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
@@ -1068,6 +1333,10 @@ export default {
         return await handleResetUsage(request, env, corsHeaders);
       } else if (path === '/feedback') {
         return await handleFeedback(request, env, corsHeaders);
+      } else if (path === '/admin/promote-calibration') {
+        return await handleAdminPromoteCalibration(request, env, corsHeaders);
+      } else if (path === '/admin/calibration-rules') {
+        return await handleAdminCalibrationRules(request, env, corsHeaders);
       } else if (path === '/trainer-chat') {
         return await handleTrainerChat(request, env, corsHeaders);
       } else if (url.pathname === '/stripe-webhook' && request.method === 'POST') {
@@ -1579,6 +1848,66 @@ async function handleSecondOpinion(request, env, corsHeaders) {
   }
 }
 
+// ─── Second Opinion scoring calibration (tunable via /admin, no src/ changes) ─
+// Hardcoded fallback used whenever CALIBRATION_KV is empty/unreachable, so the
+// /compare feature never breaks because of admin-page state.
+var DEFAULT_CALIBRATION_RULES =
+  'FACTUAL questions: Score based on whether both responses state the same facts. ' +
+  'If core facts match, score 90-100. If facts contradict, score accordingly.\n\n' +
+  'ANALYTICAL questions: You MUST distinguish between TOPIC overlap and POSITION overlap. ' +
+  'Both models discussing the same topic is NOT agreement — they must reach the same conclusion with compatible reasoning. ' +
+  'Apply these thresholds strictly:\n' +
+  '- 90-100: Models state the same conclusion with compatible supporting evidence. Rare for analytical questions.\n' +
+  '- 70-89: Models reach similar conclusions but emphasize different evidence or frameworks. This should be the DEFAULT when both models address the topic competently.\n' +
+  '- 50-69: Models address the question from different angles or frameworks, reaching compatible but non-identical conclusions.\n' +
+  '- 30-49: Models reach different conclusions or prioritize fundamentally different considerations.\n' +
+  '- 0-29: Models directly contradict each other.\n' +
+  'Be especially skeptical of high-level synthesis or "key takeaways" sections — similar-sounding summaries often mask genuinely different underlying analyses. ' +
+  'When two models both propose frameworks, check whether the frameworks lead to the same actionable conclusions, not just whether they sound similar.\n\n' +
+  'SUBJECTIVE questions: When both models express the same sentiment or values using different words, ' +
+  'credit that as agreement. Do not penalize stylistic differences on opinion-based content. ' +
+  'If both models advocate the same position with compatible reasoning, score 85-100.';
+
+var DEFAULT_CALIBRATION_EXAMPLES = [
+  { questionType: 'factual', title: 'Age requirements for House vs Senate', note: 'Both models stated identical core facts (25 and 30).', correctScore: 100 },
+  { questionType: 'factual', title: 'Joyce\'s Penelope episode technique', note: 'Both identified same technique and punctuation count; minor differences in supporting context.', correctScore: 95 },
+  { questionType: 'analytical', title: 'Medical chest pain diagnostic approach', note: 'Models discussed same topic but disagreed on timing priority (simultaneous vs sequential). Discussing the same topic is NOT agreement — they must reach the same conclusion. AI overestimated agreement.', correctScore: 74 },
+  { questionType: 'analytical', title: 'Quantum computing impact on cybersecurity', note: 'Models focused on fundamentally different technical factors (error correction thresholds vs quantum algorithms). AI overestimated agreement at 3/5; human corrected to 2/5.', correctScore: 54 },
+  { questionType: 'subjective', title: 'Unreliable narration effectiveness (subtle vs overt)', note: 'Both concluded each approach is effective for different reasons. Similar high-level sentiment but nuanced differences in supporting analysis.', correctScore: 79 },
+  { questionType: 'subjective', title: 'Philosophical exploration of free will', note: 'Both models advocated compatible positions with aligned reasoning and values.', correctScore: 100 },
+];
+
+// Reads calibration:config from CALIBRATION_KV; falls back to hardcoded defaults
+// if unset, unbound, or unreachable. Never throws.
+async function getCalibrationConfig(env) {
+  try {
+    if (env.CALIBRATION_KV) {
+      var stored = await env.CALIBRATION_KV.get('calibration:config', 'json');
+      if (stored) {
+        return {
+          rules: stored.rules || DEFAULT_CALIBRATION_RULES,
+          examples: (stored.examples && stored.examples.length) ? stored.examples : DEFAULT_CALIBRATION_EXAMPLES,
+        };
+      }
+    }
+  } catch (e) {
+    // KV outage — fall through to defaults below.
+  }
+  return { rules: DEFAULT_CALIBRATION_RULES, examples: DEFAULT_CALIBRATION_EXAMPLES };
+}
+
+function buildCalibrationSections(config) {
+  var examplesText = config.examples.map(function (ex) {
+    return ex.questionType.toUpperCase() + ' — "' + ex.title + '": ' + ex.note + ' Correct score: ' + ex.correctScore + '.';
+  }).join('\n');
+
+  return 'CRITICAL — Scoring calibration by question type:\n\n' +
+    config.rules + '\n\n' +
+    'CALIBRATION EXAMPLES (human-validated correct scores):\n\n' +
+    examplesText + '\n\n' +
+    'Use these examples to anchor your scoring. When you see a similar pattern, align your score with the corresponding example range.';
+}
+
 async function handleCompare(request, env, corsHeaders) {
   var body = await request.json();
   var original = body.original || '';
@@ -1593,6 +1922,7 @@ async function handleCompare(request, env, corsHeaders) {
 
   var distinctId = request.headers.get('X-Portility-Distinct-Id') || 'worker-anonymous';
   var startTime = Date.now();
+  var calibrationConfig = await getCalibrationConfig(env);
 
   var systemPrompt = 'You are a neutral evaluator comparing two AI responses to the same question. ' +
     'Judge only on substantive content — accuracy, completeness, and logical consistency. ' +
@@ -1625,30 +1955,7 @@ async function handleCompare(request, env, corsHeaders) {
     'Rules:\n' +
     '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
     '- "text" should be 1-2 sentences explaining the specific agreement or divergence\n\n' +
-    'CRITICAL — Scoring calibration by question type:\n\n' +
-    'FACTUAL questions: Score based on whether both responses state the same facts. ' +
-    'If core facts match, score 90-100. If facts contradict, score accordingly.\n\n' +
-    'ANALYTICAL questions: You MUST distinguish between TOPIC overlap and POSITION overlap. ' +
-    'Both models discussing the same topic is NOT agreement — they must reach the same conclusion with compatible reasoning. ' +
-    'Apply these thresholds strictly:\n' +
-    '- 90-100: Models state the same conclusion with compatible supporting evidence. Rare for analytical questions.\n' +
-    '- 70-89: Models reach similar conclusions but emphasize different evidence or frameworks. This should be the DEFAULT when both models address the topic competently.\n' +
-    '- 50-69: Models address the question from different angles or frameworks, reaching compatible but non-identical conclusions.\n' +
-    '- 30-49: Models reach different conclusions or prioritize fundamentally different considerations.\n' +
-    '- 0-29: Models directly contradict each other.\n' +
-    'Be especially skeptical of high-level synthesis or "key takeaways" sections — similar-sounding summaries often mask genuinely different underlying analyses. ' +
-    'When two models both propose frameworks, check whether the frameworks lead to the same actionable conclusions, not just whether they sound similar.\n\n' +
-    'SUBJECTIVE questions: When both models express the same sentiment or values using different words, ' +
-    'credit that as agreement. Do not penalize stylistic differences on opinion-based content. ' +
-    'If both models advocate the same position with compatible reasoning, score 85-100.\n\n' +
-    'CALIBRATION EXAMPLES (human-validated correct scores):\n\n' +
-    'FACTUAL — "Age requirements for House vs Senate": Both models stated identical core facts (25 and 30). Correct score: 100.\n' +
-    'FACTUAL — "Joyce\'s Penelope episode technique": Both identified same technique and punctuation count; minor differences in supporting context. Correct score: 95.\n\n' +
-    'ANALYTICAL — "Medical chest pain diagnostic approach": Models discussed same topic but disagreed on timing priority (simultaneous vs sequential). Discussing the same topic is NOT agreement — they must reach the same conclusion. AI overestimated agreement. Correct score: 74.\n' +
-    'ANALYTICAL — "Quantum computing impact on cybersecurity": Models focused on fundamentally different technical factors (error correction thresholds vs quantum algorithms). AI overestimated agreement at 3/5; human corrected to 2/5. Correct score: 54.\n\n' +
-    'SUBJECTIVE — "Unreliable narration effectiveness (subtle vs overt)": Both concluded each approach is effective for different reasons. Similar high-level sentiment but nuanced differences in supporting analysis. Correct score: 79.\n' +
-    'SUBJECTIVE — "Philosophical exploration of free will": Both models advocated compatible positions with aligned reasoning and values. Correct score: 100.\n\n' +
-    'Use these examples to anchor your scoring. When you see a similar pattern, align your score with the corresponding example range.';
+    buildCalibrationSections(calibrationConfig);
 
   var userContent = 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion;
 
