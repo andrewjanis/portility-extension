@@ -67,6 +67,34 @@ var PROFILE_TYPE_DEFAULTS = {
 // Uses the same section types as QUESTIONNAIRE_CONFIG: multi-select,
 // single-select-chips, textarea.
 
+// Shared sycophancy scale, identical to the one in questions-config.js's
+// QUESTIONNAIRE_CONFIG. Appended as the last page-1 section (immediately
+// before the freeform textarea page) on every profile-type questionnaire.
+var PROFILE_SYCOPHANCY_SECTION = {
+  key: 'sycophancy',
+  title: 'Sycophancy Level',
+  subtitle: 'How do you want your AI to respond to your ideas?',
+  type: 'range',
+  min: 1,
+  max: 5,
+  default: 3,
+  labels: ['Brutal Critique', 'Tough Love', 'Neutral', 'Cheerleader', 'Hardcore Glazing'],
+  instructionMap: {
+    1: 'Be brutally honest. Challenge my ideas and point out flaws without softening the message.',
+    2: 'Be direct and honest. Push back when you disagree but keep it constructive.',
+    3: "Be balanced. Acknowledge good ideas but don't hesitate to point out issues.",
+    4: "Be encouraging. Lead with what's working before suggesting improvements.",
+    5: 'Be enthusiastically supportive. Hype up my ideas and focus on the positive.',
+  },
+  confirmationExamples: {
+    1: 'For example, you might open with something like: "Ready to be unimpressed. Let\'s go."',
+    2: 'For example, you might open with something like: "No sugarcoating. Hit me with what you\'ve got."',
+    3: 'For example, you might open with something like: "Got it. Let\'s get to work."',
+    4: 'For example, you might open with something like: "Love the energy. Let\'s build something great."',
+    5: 'For example, you might open with something like: "Ready to absorb your brilliance. Let\'s go."',
+  },
+};
+
 var PROFILE_QUESTIONNAIRE_CONFIG = {
   work: {
     pages: [
@@ -109,6 +137,7 @@ var PROFILE_QUESTIONNAIRE_CONFIG = {
               { value: 'external', label: 'External',   instruction: 'Work output is client/public-facing — ensure it is polished and professional.' },
             ],
           },
+          PROFILE_SYCOPHANCY_SECTION,
         ],
       },
       {
@@ -177,6 +206,7 @@ var PROFILE_QUESTIONNAIRE_CONFIG = {
               { value: 'shared', label: 'Shared',   instruction: 'I live with housemates — consider shared living in home advice.' },
             ],
           },
+          PROFILE_SYCOPHANCY_SECTION,
         ],
       },
       {
@@ -238,6 +268,7 @@ var PROFILE_QUESTIONNAIRE_CONFIG = {
               { value: 'varies',       label: 'Varies',        instruction: 'My skill level varies by hobby — adapt as needed.' },
             ],
           },
+          PROFILE_SYCOPHANCY_SECTION,
         ],
       },
       {
@@ -284,6 +315,7 @@ var PROFILE_QUESTIONNAIRE_CONFIG = {
               { value: 'casual',      label: 'Casual',       instruction: 'Keep it casual and low-pressure.' },
             ],
           },
+          PROFILE_SYCOPHANCY_SECTION,
         ],
       },
       {

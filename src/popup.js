@@ -1514,6 +1514,11 @@ document.addEventListener('DOMContentLoaded', () => {
             instructions.push(chipMap[answer]);
           }
 
+        } else if (section.type === 'range') {
+          if (answer && section.instructionMap && section.instructionMap[answer]) {
+            instructions.push(section.instructionMap[answer]);
+          }
+
         } else if (section.type === 'textarea') {
           if (answer && answer.trim()) {
             var prefix = section.instructionPrefix || '';
@@ -1558,6 +1563,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sec.type === 'multi-select') {
           answers[sec.key] = [];
           answers[sec.key + '_customText'] = '';
+        } else if (sec.type === 'range') {
+          answers[sec.key] = sec.default || 3;
         } else if (sec.type === 'textarea') {
           answers[sec.key] = '';
         } else {
@@ -1633,6 +1640,37 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           container.appendChild(chipRow);
 
+        } else if (sec.type === 'range') {
+          if (sec.subtitle) {
+            var subEl = document.createElement('div');
+            subEl.className = 'q-section-subtitle';
+            subEl.textContent = sec.subtitle;
+            container.appendChild(subEl);
+          }
+          var rangeWrap = document.createElement('div');
+          rangeWrap.className = 'q-range-wrap';
+          var rangeInput = document.createElement('input');
+          rangeInput.type = 'range';
+          rangeInput.id = 'pq-range-' + sec.key;
+          rangeInput.min = sec.min;
+          rangeInput.max = sec.max;
+          rangeInput.value = sec.default;
+          rangeInput.step = 1;
+          rangeInput.className = 'q-range';
+          rangeWrap.appendChild(rangeInput);
+
+          if (sec.labels) {
+            var labelsDiv = document.createElement('div');
+            labelsDiv.className = 'q-range-labels';
+            for (var l = 0; l < sec.labels.length; l++) {
+              var span = document.createElement('span');
+              span.textContent = sec.labels[l];
+              labelsDiv.appendChild(span);
+            }
+            rangeWrap.appendChild(labelsDiv);
+          }
+          container.appendChild(rangeWrap);
+
         } else if (sec.type === 'textarea') {
           var textarea = document.createElement('textarea');
           textarea.className = 'q-textarea';
@@ -1645,6 +1683,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Wire up handlers
     wireUpProfileOptionHandlers();
+    wireUpProfileRangeHandlers();
+  }
+
+  /**
+   * Attach input handlers to all dynamically rendered profile range sliders.
+   */
+  function wireUpProfileRangeHandlers() {
+    var config = PROFILE_QUESTIONNAIRE_CONFIG[_selectedProfileType];
+    if (!config) return;
+    var pages = config.pages;
+    for (var p = 0; p < pages.length; p++) {
+      var sections = pages[p].sections;
+      for (var s = 0; s < sections.length; s++) {
+        if (sections[s].type === 'range') {
+          var key = sections[s].key;
+          var rangeEl = document.getElementById('pq-range-' + key);
+          if (rangeEl) {
+            (function (k) {
+              rangeEl.addEventListener('input', function () {
+                _profileAnswers[k] = parseInt(this.value, 10);
+              });
+            })(key);
+          }
+        }
+      }
+    }
   }
 
   /**
