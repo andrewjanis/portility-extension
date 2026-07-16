@@ -1998,6 +1998,7 @@ async function handleCompare(request, env, corsHeaders) {
     '- Whether a response offers the user a choice or a single path forward\n' +
     '- Tone, style, or language approach\n' +
     '- Any observation about what "both responses do" rather than what they conclude\n' +
+    '- What topic, question, or action should be explored or done next, unless the user\'s original question explicitly asked for next steps or recommendations\n' +
     'Only include items where the models take a position on a factual claim, a diagnosis, a recommendation, a risk assessment, or an analytical conclusion — and either agree or disagree on that position.\n\n' +
     'TITLE RULE: Titles must name the factual or analytical point directly. ' +
     'Never begin a title with "Both responses", "Both models", "Each response", or any phrase that describes the AI outputs. ' +
@@ -2018,7 +2019,7 @@ async function handleCompare(request, env, corsHeaders) {
     '  "divergences": [\n' +
     '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of how the models differ>"}\n' +
     '  ],\n' +
-    '  "interpretation": "<Lead with \'Key question: [the core question being asked].\' Then one sentence on whether the models agree or disagree on the answer to that specific question. Do not describe tone, style, or how information is presented.>"\n' +
+    '  "interpretation": "<Lead with \'Key question: [the core question being asked, stated exactly as the user asked it — never append what should be explored, asked, or done next unless the user\'s question explicitly asked for that].\' Then one sentence on whether the models agree or disagree on the answer to that specific question. Do not describe tone, style, or how information is presented, and do not suggest or reference next steps unless the user explicitly asked for them.>"\n' +
     '}\n\n' +
     'Rules:\n' +
     '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
