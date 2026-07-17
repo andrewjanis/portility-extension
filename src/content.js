@@ -137,10 +137,12 @@
 
   /**
    * Extract file content by clicking the file card to open Claude's preview,
-   * then scraping the content from the resulting DOM overlay.
+   * then scraping the content from the resulting DOM overlay. If Claude can't
+   * render a text preview (e.g. Office docs, PDFs), fall back to looking for a
+   * download link inside the overlay (e.g. a "Download to view" affordance).
    * @param {Element} btnEl - The file card button element
    * @param {string} filename - The filename for MIME type detection
-   * @returns {Promise<string|null>} data URL or null
+   * @returns {Promise<{dataUrl: string|null, downloadUrl: string|null}>}
    */
   function extractFileViaClick(btnEl, filename) {
     return new Promise(function (resolve) {
@@ -192,6 +194,15 @@
             textContent = newOverlay.textContent || newOverlay.innerText || '';
           }
 
+          // Look for a download link inside the overlay (e.g. Office docs/PDFs
+          // that Claude can't render a text preview for typically show a
+          // "Download to view" affordance with a real href).
+          var downloadUrl = null;
+          if (newOverlay) {
+            var anchorEl = newOverlay.querySelector('a[href], a[download]');
+            if (anchorEl && anchorEl.href) downloadUrl = anchorEl.href;
+          }
+
           // Close the preview
           document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
           setTimeout(function () {
@@ -215,10 +226,16 @@
             else if (/\.py$/i.test(filename)) mimeType = 'text/x-python';
             var dataUrl = 'data:' + mimeType + ';base64,' + btoa(unescape(encodeURIComponent(textContent)));
             console.log('[Portility] Extracted', textContent.length, 'chars from file preview');
-            resolve(dataUrl);
+            resolve({ dataUrl: dataUrl, downloadUrl: downloadUrl });
+          } else if (downloadUrl) {
+            console.log('[Portility] No text preview, but found download link in overlay');
+            resolve({ dataUrl: null, downloadUrl: downloadUrl });
           } else {
-            console.log('[Portility] Preview content too small:', textContent.length, 'chars');
-            resolve(null);
+            console.log('[Portility] Preview content too small:', textContent.length, 'chars, no download link found');
+            if (newOverlay) {
+              console.log('[Portility] Overlay HTML (truncated):', (newOverlay.outerHTML || '').slice(0, 500));
+            }
+            resolve({ dataUrl: null, downloadUrl: null });
           }
           return;
         }
@@ -228,7 +245,7 @@
           // Close anything that might have opened
           document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
           console.log('[Portility] File preview did not appear after', attempts, 'checks');
-          resolve(null);
+          resolve({ dataUrl: null, downloadUrl: null });
         }
       }, 200);
     });
@@ -326,8 +343,11 @@
       if (linkEl) downloadUrl = linkEl.href;
 
       // Strategy 2: Click the file card to open preview and extract content
+      // (or, failing that, a download link from the preview overlay)
       if (!dataUrl) {
-        dataUrl = await extractFileViaClick(btn, filename);
+        var clickResult = await extractFileViaClick(btn, filename);
+        dataUrl = clickResult.dataUrl;
+        if (!downloadUrl) downloadUrl = clickResult.downloadUrl;
       }
 
       newAssets.push({

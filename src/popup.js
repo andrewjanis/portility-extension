@@ -2750,14 +2750,66 @@ document.addEventListener('DOMContentLoaded', () => {
   // Real photos are 20KB+ (~27000+ chars).
   var MIN_IMAGE_DATA_LENGTH = 10000;
 
+  /**
+   * Detect groups of file assets that are different versions of the same
+   * document (e.g. "Report.pptx" and "Report_v2.pptx", or "Report (2).pptx")
+   * so only the latest version is pre-selected by default. Earlier versions
+   * stay visible and selectable — just unchecked.
+   * @param {Array} capturedImages
+   * @returns {Set<number>} indices (into capturedImages) of non-latest versions
+   */
+  function detectSupersededVersions(capturedImages) {
+    var groups = {}; // baseKey -> [{ index, version }]
+    var versionRe = /^(.*?)[\s_.-]*\(?v(?:ersion)?\.?\s*(\d+)\)?$/i;
+    var parenRe = /^(.*?)[\s_.-]*\((\d+)\)$/;
+
+    capturedImages.forEach(function (ci, idx) {
+      if (ci.type !== 'file' || !ci.filename) return;
+      var name = ci.filename.replace(/\.[^.\\/]+$/, ''); // strip extension
+      var m = name.match(versionRe) || name.match(parenRe);
+      var baseKey, version;
+      if (m) {
+        baseKey = m[1].trim().toLowerCase();
+        version = parseInt(m[2], 10);
+      } else {
+        baseKey = name.trim().toLowerCase();
+        version = 1; // implicit v1 (no version marker in filename)
+      }
+      if (!baseKey) return;
+      if (!groups[baseKey]) groups[baseKey] = [];
+      groups[baseKey].push({ index: idx, version: version });
+    });
+
+    var superseded = new Set();
+    Object.keys(groups).forEach(function (key) {
+      var members = groups[key];
+      if (members.length < 2) return;
+      // Highest version number wins; ties broken by later position (more recent in conversation)
+      var latest = members[0];
+      for (var i = 1; i < members.length; i++) {
+        if (members[i].version > latest.version ||
+            (members[i].version === latest.version && members[i].index > latest.index)) {
+          latest = members[i];
+        }
+      }
+      members.forEach(function (m) {
+        if (m.index !== latest.index) superseded.add(m.index);
+      });
+    });
+
+    return superseded;
+  }
+
   function showImageSelection(capturedImages, aiAssets) {
     proAssetTableBody.innerHTML = '';
 
     // Filter out tiny images (favicons, logos, tiny thumbnails).
-    // File-type assets skip the size filter — any non-empty dataUrl is valid.
+    // File-type assets skip the size/existence filter — even ones we couldn't
+    // extract content for (dataUrl: null) are shown, disabled, with a reason
+    // explaining they need to be downloaded manually.
     var realImages = capturedImages.filter(function(ci) {
-      if (!ci.dataUrl) return false;
       if (ci.type === 'file') return true;
+      if (!ci.dataUrl) return false;
       return ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
     });
 
@@ -2768,8 +2820,9 @@ document.addEventListener('DOMContentLoaded', () => {
     var originalIndices = [];
     for (var oi = 0; oi < capturedImages.length; oi++) {
       var ci = capturedImages[oi];
+      if (ci.type === 'file') { originalIndices.push(oi); continue; }
       if (!ci.dataUrl) continue;
-      if (ci.type === 'file' || ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
+      if (ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
         originalIndices.push(oi);
       }
     }
@@ -2778,6 +2831,10 @@ document.addEventListener('DOMContentLoaded', () => {
     var flaggedAssets = aiAssets ? aiAssets.filter(function(a) {
       return !a.id || !a.id.startsWith('extra_');
     }) : null;
+
+    // Only pre-select the latest version of a document when multiple versions
+    // of the same file were detected (e.g. "Report.pptx" + "Report_v2.pptx")
+    var supersededIndices = detectSupersededVersions(capturedImages);
 
     realImages.forEach(function(ci, i) {
       var tr = document.createElement('tr');
@@ -2806,11 +2863,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // Pre-select if AI flagged it, or if no AI data available (full-text mode)
+      var isUnextracted = ci.type === 'file' && !ci.dataUrl;
+      var isSuperseded = supersededIndices.has(originalIndices[i]);
+
+      // Pre-select if AI flagged it, or if no AI data available (full-text mode).
+      // Earlier versions of a document are never pre-selected, even if AI-flagged.
       var tdCheck = document.createElement('td');
       var cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = aiMatch ? true : !flaggedAssets || flaggedAssets.length === 0;
+      cb.checked = (isUnextracted || isSuperseded) ? false : (aiMatch ? true : !flaggedAssets || flaggedAssets.length === 0);
+      if (isUnextracted) cb.disabled = true;
       cb.setAttribute('data-asset-index', String(originalIndices[i]));
       tdCheck.appendChild(cb);
       tr.appendChild(tdCheck);
@@ -2849,7 +2911,11 @@ document.addEventListener('DOMContentLoaded', () => {
       // Reason cell
       var tdWhy = document.createElement('td');
       tdWhy.className = 'pro-asset-reason';
-      tdWhy.textContent = (aiMatch && aiMatch.reason) || 'Detected in conversation';
+      tdWhy.textContent = isUnextracted
+        ? "Couldn't extract this file automatically — open the original conversation to download it manually"
+        : isSuperseded
+        ? 'Earlier version of this document — a newer version was detected and pre-selected instead'
+        : ((aiMatch && aiMatch.reason) || 'Detected in conversation');
       tr.appendChild(tdWhy);
 
       proAssetTableBody.appendChild(tr);

@@ -460,6 +460,10 @@
     var alreadyCaptured = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.dataUrl; });
     var needsCapture = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.url && !a.dataUrl; });
     var toCapture = needsCapture.slice(0, MAX_CAPTURE_ASSETS);
+    // File assets with neither a URL nor extracted content: we can't fetch these,
+    // but still surface them (dataUrl: null) so they're visible in the picker
+    // instead of silently vanishing.
+    var unresolvedFiles = assets.filter(function (a) { return a.type === 'file' && !a.url && !a.dataUrl; });
 
     await Promise.allSettled(
       toCapture.map(function (asset) {
@@ -498,11 +502,12 @@
     var totalCaptured = alreadyCaptured.length + newlyCaptured.length;
     console.log('[Portility] Asset capture: ' + newlyCaptured.length + '/' + toCapture.length + ' fetched' +
       (alreadyCaptured.length > 0 ? ', ' + alreadyCaptured.length + ' pre-captured' : '') +
+      (unresolvedFiles.length > 0 ? ', ' + unresolvedFiles.length + ' unresolved (no URL/content)' : '') +
       (needsCapture.length > MAX_CAPTURE_ASSETS ? ' (' + (needsCapture.length - MAX_CAPTURE_ASSETS) + ' skipped, cap=' + MAX_CAPTURE_ASSETS + ')' : ''));
 
     // Store captured assets directly in chrome.storage.local
     // (avoids sendResponse message size limits)
-    var allCapturedAssets = alreadyCaptured.concat(newlyCaptured);
+    var allCapturedAssets = alreadyCaptured.concat(newlyCaptured, unresolvedFiles);
     if (allCapturedAssets.length > 0) {
       var assetPayload = allCapturedAssets.map(function (a) {
         return { dataUrl: a.dataUrl, filename: a.filename || 'image.jpg', url: a.url || null, alt: a.alt || null, type: a.type || 'image' };
