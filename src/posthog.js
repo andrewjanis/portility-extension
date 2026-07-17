@@ -1,8 +1,8 @@
 /**
  * posthog.js
- * PostHog analytics integration for The Drewery Chrome Extension.
+ * PostHog analytics integration for the Portility Chrome Extension.
  * Injected as a content script on claude.ai pages.
- * Exposes window.dreweryTrack() for use by content.js.
+ * Exposes window.portilityTrack() for use by content.js.
  */
 
 (function () {
@@ -14,18 +14,22 @@
   // Generate or retrieve a persistent anonymous distinct_id
   function getAnonDistinctId() {
     try {
-      let id = localStorage.getItem('drewery_distinct_id');
+      let id = localStorage.getItem('portility_distinct_id');
       if (!id) {
-        id = 'drewery-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
-        localStorage.setItem('drewery_distinct_id', id);
+        // Fall back to the legacy key so existing anonymous users keep the same identity
+        id = localStorage.getItem('drewery_distinct_id');
+        if (!id) {
+          id = 'portility-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
+        }
+        localStorage.setItem('portility_distinct_id', id);
       }
       return id;
     } catch (e) {
       // localStorage unavailable (e.g., service worker context) — use a session-scoped fallback
-      if (!self._dreweryDistinctId) {
-        self._dreweryDistinctId = 'drewery-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
+      if (!self._portilityDistinctId) {
+        self._portilityDistinctId = 'portility-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
       }
-      return self._dreweryDistinctId;
+      return self._portilityDistinctId;
     }
   }
 
@@ -97,7 +101,7 @@
         distinct_id: distinctId,
         properties: Object.assign(
           {
-            $lib: 'drewery-extension',
+            $lib: 'portility-extension',
             $lib_version: '1.0.0',
           },
           properties || {}
@@ -120,12 +124,12 @@
   // Export for use in content.js
   // Attaches to the window object for content script context
   try {
-    window.dreweryTrack = trackEvent;
+    window.portilityTrack = trackEvent;
   } catch (e) {
     // service worker — no window
   }
   try {
-    self.dreweryTrack = trackEvent;
+    self.portilityTrack = trackEvent;
   } catch (e) {
     // ignore
   }

@@ -3,10 +3,10 @@
  * 1. Open Chrome and go to chrome://extensions
  * 2. Enable Developer Mode (toggle in top right)
  * 3. Click "Load unpacked"
- * 4. Select the drewery-extension folder
+ * 4. Select the portility-extension folder
  * 5. Open claude.ai in a new tab
  * 6. Start or open a conversation with at least one exchange
- * 7. Click The Drewery icon in the Chrome toolbar
+ * 7. Click the Portility icon in the Chrome toolbar
  * 8. Open a new Claude chat tab
  * 9. Paste (Cmd+V or Ctrl+V)
  * 10. Verify the framing text and conversation appear correctly
@@ -92,19 +92,23 @@ async function getDistinctId() {
 
   if (_distinctId) return _distinctId;
   try {
-    const data = await chrome.storage.local.get('drewery_distinct_id');
-    if (data.drewery_distinct_id) {
+    const data = await chrome.storage.local.get(['portility_distinct_id', 'drewery_distinct_id']);
+    if (data.portility_distinct_id) {
+      _distinctId = data.portility_distinct_id;
+    } else if (data.drewery_distinct_id) {
+      // Migrate legacy key so existing anonymous users keep the same identity
       _distinctId = data.drewery_distinct_id;
+      await chrome.storage.local.set({ portility_distinct_id: _distinctId });
     } else {
       _distinctId =
-        'drewery-bg-' +
+        'portility-bg-' +
         Math.random().toString(36).slice(2) +
         '-' +
         Date.now().toString(36);
-      await chrome.storage.local.set({ drewery_distinct_id: _distinctId });
+      await chrome.storage.local.set({ portility_distinct_id: _distinctId });
     }
   } catch (e) {
-    _distinctId = 'drewery-bg-fallback';
+    _distinctId = 'portility-bg-fallback';
   }
   return _distinctId;
 }
@@ -115,7 +119,7 @@ async function getDistinctId() {
 async function maybeIdentifyUser() {
   try {
     const data = await chrome.storage.local.get([
-      'firebase_uid', 'google_login_hint', 'drewery_distinct_id', 'posthog_identified_uid',
+      'firebase_uid', 'google_login_hint', 'portility_distinct_id', 'drewery_distinct_id', 'posthog_identified_uid',
     ]);
     if (!data.firebase_uid || data.posthog_identified_uid === data.firebase_uid) return;
     fetch(POSTHOG_HOST + '/capture/', {
@@ -127,7 +131,7 @@ async function maybeIdentifyUser() {
         distinct_id: data.firebase_uid,
         properties: {
           $set: { email: data.google_login_hint || undefined },
-          $anon_distinct_id: data.drewery_distinct_id,
+          $anon_distinct_id: data.portility_distinct_id || data.drewery_distinct_id,
         },
         timestamp: new Date().toISOString(),
       }),
@@ -149,7 +153,7 @@ async function trackEvent(eventName, properties) {
       event: eventName,
       distinct_id: distinctId,
       properties: Object.assign(
-        { $lib: 'drewery-extension', $lib_version: '1.0.0' },
+        { $lib: 'portility-extension', $lib_version: '1.0.0' },
         properties || {}
       ),
       timestamp: new Date().toISOString(),
@@ -1096,14 +1100,14 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (tabId != null) {
       showCheckmark(tabId);
     }
-    trackEvent('drewery_extract_success', {
+    trackEvent('portility_extract_success', {
       message_count: message.messageCount || 0,
     });
     return;
   }
 
   if (message.type === 'EXTRACTION_FAILED') {
-    trackEvent('drewery_extract_failed', {
+    trackEvent('portility_extract_failed', {
       error: message.error || 'unknown',
     });
     return;

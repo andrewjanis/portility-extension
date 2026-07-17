@@ -1101,7 +1101,7 @@
     const wrap = function (original) {
       return function () {
         const result = original.apply(this, arguments);
-        window.dispatchEvent(new Event('drewery:urlchange'));
+        window.dispatchEvent(new Event('portility:urlchange'));
         return result;
       };
     };
@@ -1110,7 +1110,7 @@
   })();
 
   window.addEventListener('popstate', onUrlChange);
-  window.addEventListener('drewery:urlchange', onUrlChange);
+  window.addEventListener('portility:urlchange', onUrlChange);
 
   // ─── MutationObserver ─────────────────────────────────────────────────────
   let mutationDebounceTimer = null;
@@ -1242,8 +1242,8 @@
           await copyToClipboard(formatted);
         }
 
-        if (typeof window.dreweryTrack === 'function') {
-          window.dreweryTrack('drewery_extract_success', {
+        if (typeof window.portilityTrack === 'function') {
+          window.portilityTrack('portility_extract_success', {
             platform: 'gemini',
             message_count: messages.length,
           });
@@ -1257,8 +1257,8 @@
       } catch (err) {
         const errorMessage = err && err.message ? err.message : String(err);
 
-        if (typeof window.dreweryTrack === 'function') {
-          window.dreweryTrack('drewery_extract_failed', {
+        if (typeof window.portilityTrack === 'function') {
+          window.portilityTrack('portility_extract_failed', {
             platform: 'gemini',
             error: errorMessage,
           });
@@ -1282,8 +1282,8 @@
     function doPaste(text) {
       if (pasting) return;
       pasting = true;
-      if (typeof window.dreweryTrack === 'function') {
-        window.dreweryTrack('auto_paste_started', { platform: 'gemini' });
+      if (typeof window.portilityTrack === 'function') {
+        window.portilityTrack('auto_paste_started', { platform: 'gemini' });
       }
       var attempts = 0;
       var interval = setInterval(function () {
@@ -1293,8 +1293,8 @@
           || document.querySelector('textarea');
         if (input) {
           clearInterval(interval);
-          if (typeof window.dreweryTrack === 'function') {
-            window.dreweryTrack('auto_paste_input_found', { platform: 'gemini', attempts: attempts });
+          if (typeof window.portilityTrack === 'function') {
+            window.portilityTrack('auto_paste_input_found', { platform: 'gemini', attempts: attempts });
           }
           input.focus();
           if (input.tagName === 'TEXTAREA') {
@@ -1323,13 +1323,13 @@
                   if (sendBtn && !sendBtn.disabled) {
                     clearInterval(submitInterval);
                     sendBtn.click();
-                    if (typeof window.dreweryTrack === 'function') {
-                      window.dreweryTrack('portility_auto_submit', { platform: 'gemini', success: true });
+                    if (typeof window.portilityTrack === 'function') {
+                      window.portilityTrack('portility_auto_submit', { platform: 'gemini', success: true });
                     }
                   } else if (++submitAttempts > 30) {
                     clearInterval(submitInterval);
-                    if (typeof window.dreweryTrack === 'function') {
-                      window.dreweryTrack('portility_auto_submit', {
+                    if (typeof window.portilityTrack === 'function') {
+                      window.portilityTrack('portility_auto_submit', {
                         platform: 'gemini',
                         success: false,
                         reason: sendBtn ? 'button_disabled' : 'button_not_found',
@@ -1392,8 +1392,8 @@
         if (++attempts > 40) {
           clearInterval(interval);
           pasting = false;
-          if (typeof window.dreweryTrack === 'function') {
-            window.dreweryTrack('portility_auto_submit', {
+          if (typeof window.portilityTrack === 'function') {
+            window.portilityTrack('portility_auto_submit', {
               platform: 'gemini',
               success: false,
               reason: 'input_not_found',
@@ -1418,7 +1418,7 @@
   })();
 
   // ─── Page load analytics ──────────────────────────────────────────────────
-  if (typeof window.dreweryTrack === 'function') {
-    window.dreweryTrack('drewery_page_load', { platform: 'gemini' });
+  if (typeof window.portilityTrack === 'function') {
+    window.portilityTrack('portility_page_load', { platform: 'gemini' });
   }
 })();

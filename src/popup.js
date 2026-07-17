@@ -131,8 +131,12 @@ window.addEventListener('unhandledrejection', function () {
 // per-install distinct_id as before.
 async function getDistinctId() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['drewery_distinct_id', 'firebase_uid'], (data) => {
-      resolve(data.firebase_uid || data.drewery_distinct_id || 'drewery-popup-unknown');
+    chrome.storage.local.get(['portility_distinct_id', 'drewery_distinct_id', 'firebase_uid'], (data) => {
+      if (!data.firebase_uid && !data.portility_distinct_id && data.drewery_distinct_id) {
+        // Migrate legacy key so existing anonymous users keep the same identity
+        chrome.storage.local.set({ portility_distinct_id: data.drewery_distinct_id });
+      }
+      resolve(data.firebase_uid || data.portility_distinct_id || data.drewery_distinct_id || 'portility-popup-unknown');
     });
   });
 }
@@ -143,7 +147,7 @@ async function getDistinctId() {
 async function maybeIdentifyUser() {
   try {
     const data = await chrome.storage.local.get([
-      'firebase_uid', 'google_login_hint', 'drewery_distinct_id', 'posthog_identified_uid',
+      'firebase_uid', 'google_login_hint', 'portility_distinct_id', 'drewery_distinct_id', 'posthog_identified_uid',
     ]);
     if (!data.firebase_uid || data.posthog_identified_uid === data.firebase_uid) return;
     fetch(POSTHOG_HOST + '/capture/', {
@@ -155,7 +159,7 @@ async function maybeIdentifyUser() {
         distinct_id: data.firebase_uid,
         properties: {
           $set: { email: data.google_login_hint || undefined },
-          $anon_distinct_id: data.drewery_distinct_id,
+          $anon_distinct_id: data.portility_distinct_id || data.drewery_distinct_id,
         },
         timestamp: new Date().toISOString(),
       }),

@@ -14,7 +14,7 @@ const extensionGlobals = {
 
   // posthog.js
   POSTHOG_API_KEY: "writable",
-  dreweryTrack: "writable",
+  portilityTrack: "writable",
 
   // port-my-chat-prompts.js
   PORT_MY_CHAT_PROMPTS: "writable",
