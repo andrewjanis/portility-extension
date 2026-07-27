@@ -1972,6 +1972,15 @@ function buildCalibrationSections(config) {
     'Use these examples to anchor your scoring. When you see a similar pattern, align your score with the corresponding example range.';
 }
 
+// Clamps a score_breakdown sub-score to [0, max], defaulting to 0 for
+// missing/non-numeric values so a malformed model response can't produce
+// NaN or an out-of-range agreement_score.
+function clampScore(value, max) {
+  var n = Number(value);
+  if (!isFinite(n)) n = 0;
+  return Math.max(0, Math.min(max, Math.round(n)));
+}
+
 async function handleCompare(request, env, corsHeaders) {
   var body = await request.json();
   var original = body.original || '';
@@ -2012,18 +2021,29 @@ async function handleCompare(request, env, corsHeaders) {
     'Return this JSON structure:\n' +
     '{\n' +
     '  "question_type": "factual" | "subjective" | "analytical",\n' +
-    '  "agreement_score": <integer 0-100>,\n' +
+    '  "score_breakdown": {\n' +
+    '    "factual_accuracy": <integer 0-40, degree to which the two responses agree on facts, data points, and claims>,\n' +
+    '    "conclusion_alignment": <integer 0-30, whether the two responses reach the same final answer, recommendation, or diagnosis>,\n' +
+    '    "reasoning_consistency": <integer 0-30, whether the reasoning/logic behind each conclusion is compatible and non-contradictory>\n' +
+    '  },\n' +
     '  "agreements": [\n' +
-    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of what both models agree on>"}\n' +
+    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of what both models agree on>", "quote_a": "<verbatim or near-verbatim supporting quote from Response A, or null if Response A does not address this point>", "quote_b": "<same for Response B, or null>"}\n' +
     '  ],\n' +
     '  "divergences": [\n' +
-    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of how the models differ>"}\n' +
+    '    {"title": "<2-5 word noun phrase using specific vocabulary from the source text, distinct from every other title in this response>", "text": "<description of how the models differ>", "quote_a": "<...>", "quote_b": "<...>"}\n' +
     '  ],\n' +
     '  "interpretation": "<Lead with \'Key question: [the core question being asked, stated exactly as the user asked it — never append what should be explored, asked, or done next unless the user\'s question explicitly asked for that].\' Then one sentence on whether the models agree or disagree on the answer to that specific question. Do not describe tone, style, or how information is presented, and do not suggest or reference next steps unless the user explicitly asked for them.>"\n' +
     '}\n\n' +
     'Rules:\n' +
-    '- agreement_score: 0 = complete disagreement, 100 = perfect alignment\n' +
+    '- Score each of the three score_breakdown dimensions independently and honestly, using its full sub-range. Two responses can score very differently across dimensions — e.g. high factual_accuracy but low reasoning_consistency if they cite the same facts but reach that conclusion via contradictory logic.\n' +
+    '- Do not pick a target total first and then split it evenly or proportionally across the three dimensions. Score each one on its own merits, from the evidence in that specific response pair — this is what produces a realistic, non-repetitive final total.\n' +
+    '- factual_accuracy 0 = facts directly contradict; 40 = facts fully match (or no verifiable facts are in play, in which case default toward the middle of the range).\n' +
+    '- conclusion_alignment 0 = opposite conclusions/recommendations; 30 = same conclusion/recommendation.\n' +
+    '- reasoning_consistency 0 = reasoning paths contradict each other; 30 = reasoning paths are compatible (need not be identical).\n' +
     '- "text" should be 1-2 sentences explaining the specific agreement or divergence\n\n' +
+    '- "quote_a" and "quote_b" must be copied verbatim (or only lightly trimmed) from the actual Response A / Response B text supplied above — never paraphrase, summarize, or invent a quote. Each should be a single supporting sentence or clause, roughly under 250 characters, that demonstrates the response actually making this specific point — not a restatement of the title/topic label itself.\n' +
+    '- If one side\'s response never actually addresses this specific point, set that side\'s quote field to null rather than forcing or fabricating an unrelated quote. Apply this to both agreements and divergences items.\n\n' +
+    'The calibration guidance below describes bands for the TOTAL score (the sum of factual_accuracy + conclusion_alignment + reasoning_consistency). Use it to sanity-check where your total should land, but reach that total by scoring the three dimensions independently — never by reverse-engineering sub-scores to hit a pre-picked total.\n\n' +
     buildCalibrationSections(calibrationConfig);
 
   var userContent = 'Response A (original):\n\n' + original + '\n\n---\n\nResponse B (second opinion):\n\n' + secondOpinion;
@@ -2070,6 +2090,24 @@ async function handleCompare(request, env, corsHeaders) {
       status: 500,
       headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders),
     });
+  }
+
+  // Compute agreement_score server-side from the three independently-scored
+  // sub-dimensions, rather than trusting a single holistic model-generated
+  // number — decomposing avoids the LLM's tendency to cluster holistic scores
+  // around a handful of "precise-looking" digit endings (e.g. always X2/X8).
+  if (parsed.score_breakdown) {
+    var factualAccuracy = clampScore(parsed.score_breakdown.factual_accuracy, 40);
+    var conclusionAlignment = clampScore(parsed.score_breakdown.conclusion_alignment, 30);
+    var reasoningConsistency = clampScore(parsed.score_breakdown.reasoning_consistency, 30);
+    parsed.score_breakdown = {
+      factual_accuracy: factualAccuracy,
+      conclusion_alignment: conclusionAlignment,
+      reasoning_consistency: reasoningConsistency,
+    };
+    parsed.agreement_score = factualAccuracy + conclusionAlignment + reasoningConsistency;
+  } else if (typeof parsed.agreement_score !== 'number') {
+    parsed.agreement_score = 0;
   }
 
   parsed._usage = extractUsage(data, 'anthropic', 'claude-sonnet-4-6');

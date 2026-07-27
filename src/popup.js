@@ -59,6 +59,13 @@ async function writeClipboard(text) {
   }
 }
 
+// Strips the trailing " - Claude"/"| ChatGPT"/etc. AI-product suffix that
+// these chat SPAs append to document.title, for use as a human-facing
+// display title (unlike safeChatFilename below, this keeps spaces/punctuation).
+function stripAiTitleSuffix(title) {
+  return (title || '').replace(/\s*[-|]\s*(Claude|ChatGPT|Gemini|Copilot).*$/i, '').trim();
+}
+
 // ─── Filename helper ─────────────────────────────────────────────────────────
 function safeChatFilename(title, platform) {
   var name = title.replace(/\s*[-|]\s*(Claude|ChatGPT|Gemini|Copilot).*$/i, '').trim();
@@ -3401,6 +3408,7 @@ document.addEventListener('DOMContentLoaded', () => {
         platform: platform,
         comparison: compareData,
         durationMs: Date.now() - _soStartTime,
+        chatTitle: stripAiTitleSuffix(tab.title),
       });
       // Record successful use (fire-and-forget)
       if (_pendingAuth && _pendingFeature) {
@@ -3464,9 +3472,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function soScoreLbl(score) {
-    return score < 34 ? 'Significant disagreement'
-         : score < 67 ? 'Partial overlap'
-         : 'Strong agreement';
+    return score >= 80 ? 'Strong agreement'
+         : score >= 60 ? 'Moderate agreement'
+         : score >= 40 ? 'Fair agreement'
+         : score >= 25 ? 'Some agreement'
+         : 'Poor agreement';
   }
 
   function soAnimateScore(from, to, textColor) {
@@ -3576,9 +3586,14 @@ document.addEventListener('DOMContentLoaded', () => {
     badge.style.color = tc[1];
     badge.style.borderColor = tc[2];
 
-    // Stop needle sweep and restore CSS transition for the snap
+    // Stop needle sweep and restore CSS transition for the snap. Force a
+    // reflow before re-enabling the transition so the browser commits the
+    // sweep's current position as the animation's starting point — without
+    // this, the transition + final rotation can land in the same style
+    // recalculation and skip straight to the end value instead of gliding.
     stopNeedleSweep();
     var needleEl = document.getElementById('so-needle');
+    void needleEl.offsetHeight;
     needleEl.style.transition = 'transform 0.9s cubic-bezier(0.34,1.2,0.64,1)';
 
     // Ensure gauge band is visible
@@ -3602,9 +3617,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Interpretation
     document.getElementById('so-interp').textContent = cmp.interpretation || '';
 
-    // Agreements
+    // Agreements — top 3 only in this initial readout (model returns them in
+    // order of significance); the full list is still available via "View
+    // full comparison".
     document.getElementById('so-agree-list').innerHTML =
-      (cmp.agreements || []).map(function (a) {
+      (cmp.agreements || []).slice(0, 3).map(function (a) {
         var parts = soSplitTitleBody(a);
         return '<div class="so-list-row" style="border-color:#C0DD97">' +
           '<span class="so-row-title">' + escHtml(parts.title) + ':</span> ' + escHtml(parts.summary) +
@@ -3612,9 +3629,9 @@ document.addEventListener('DOMContentLoaded', () => {
         '</div>';
       }).join('');
 
-    // Divergences
+    // Divergences — top 3 only, same reasoning as above.
     document.getElementById('so-diff-list').innerHTML =
-      (cmp.divergences || []).map(function (d) {
+      (cmp.divergences || []).slice(0, 3).map(function (d) {
         var parts = soSplitTitleBody(d);
         return '<div class="so-list-row" style="border-color:#F7C1C1">' +
           '<span class="so-row-title">' + escHtml(parts.title) + ':</span> ' + escHtml(parts.summary) +
@@ -3638,6 +3655,7 @@ document.addEventListener('DOMContentLoaded', () => {
       source: data.source || '',
       platform: data.platform || '',
       comparison: data.comparison || {},
+      chatTitle: data.chatTitle || '',
     };
 
     // Persist for history + ML training
@@ -3681,6 +3699,7 @@ document.addEventListener('DOMContentLoaded', () => {
             source: data.source || '',
             platform: data.platform || '',
             comparison: data.comparison || {},
+            chatTitle: data.chatTitle || '',
           },
           timestamp: Date.now(),
           tabUrl: tabUrl,
@@ -3818,7 +3837,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Expose for console testing (remove before release)
   window._testSO = showSecondOpinionResults;
 
-  soViewFullBtn.addEventListener('click', async function () {
+  async function openComparisonPage(action) {
     if (!_soResultData) return;
     var rd = _soResultData;
     var fcAuth;
@@ -3831,14 +3850,22 @@ document.addEventListener('DOMContentLoaded', () => {
       source: rd.source || '',
       platform: rd.platform || '',
       comparison: rd.comparison || {},
+      chatTitle: rd.chatTitle || '',
       idToken: fcAuth ? fcAuth.idToken : '',
       proxyUrl: proxyBase,
     };
     await new Promise(function (resolve) {
       chrome.storage.local.set({ portility_comparison_data: compData }, resolve);
     });
-    chrome.tabs.create({ url: chrome.runtime.getURL('comparison.html') });
-  });
+    var url = chrome.runtime.getURL('comparison.html') + (action ? '?action=' + action : '');
+    chrome.tabs.create({ url: url });
+  }
+
+  soViewFullBtn.addEventListener('click', function () { openComparisonPage(); });
+  var soPrintBtn = document.getElementById('soPrintBtn');
+  var soDownloadBtn = document.getElementById('soDownloadBtn');
+  if (soPrintBtn) soPrintBtn.addEventListener('click', function () { openComparisonPage('print'); });
+  if (soDownloadBtn) soDownloadBtn.addEventListener('click', function () { openComparisonPage('download'); });
 
   // ── Inline Likert rating ────────────────────────────────────────────────────
   document.querySelectorAll('.so-likert-btn').forEach(function (btn) {

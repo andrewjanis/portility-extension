@@ -70,7 +70,23 @@
 
     var sentences = text.split(/[.!?\n]+/)
       .map(function (s) { return s.trim(); })
-      .filter(function (s) { return s.length > 15; });
+      .filter(function (s) { return s.length > 15; })
+      // Exclude section-heading lines (e.g. "### On X" or "**On X**"). These
+      // are often the literal source of the theme title's wording, so they
+      // win the keyword-overlap score every time despite adding no new
+      // information beyond restating the title.
+      .filter(function (s) {
+        if (/^#{1,6}\s/.test(s)) return false;
+        if (/^\*\*[^*]+\*\*:?$/.test(s)) return false;
+        return true;
+      })
+      // Exclude short label/heading fragments (e.g. "Develop yourself",
+      // "Team Leadership") that lost their markdown/HTML markup during text
+      // extraction from a rendered chat UI, leaving no syntactic cue that
+      // they were a heading. These still win on the 1/sqrt(length) scoring
+      // below purely by being short and keyword-dense, so require a minimum
+      // word count to make sure the pick is an actual supporting sentence.
+      .filter(function (s) { return s.split(/\s+/).length >= 5; });
 
     function pickBest(excludeUsed) {
       var best = '';
@@ -104,7 +120,7 @@
     if (usedSentences) usedSentences.add(best);
 
     best = best.replace(/\*\*/g, '').replace(/^#+\s*/, '').replace(/^[-*]\s+/, '');
-    if (best.length > 180) best = best.substring(0, 177) + '...';
+    if (best.length > 250) best = best.substring(0, 247) + '...';
     return best;
   }
 
@@ -124,12 +140,22 @@
     var ai1Name = platformNames[d.platform] || d.platform || 'AI 1';
     var ai2Name = platformNames[d.source] || d.source || 'AI 2';
 
-    // Score
-    var scoreEl = document.getElementById('scoreNumber');
-    var pctEl = document.getElementById('scorePct');
-    scoreEl.textContent = score;
-    scoreEl.style.color = scoreColor;
-    pctEl.style.color = scoreColor;
+    // Score dial
+    var dialRot = -120 + (score / 100) * 240;
+    document.getElementById('scoreDialNeedle').style.transform = 'rotate(' + dialRot + 'deg)';
+    document.getElementById('scoreDialNeedleMain').setAttribute('stroke', scoreColor);
+    document.getElementById('scoreDialNeedleTail').setAttribute('stroke', scoreColor);
+    document.getElementById('scoreDialHub').setAttribute('fill', scoreColor);
+    var scoreNumEl = document.getElementById('scoreDialNumber');
+    scoreNumEl.textContent = score;
+    scoreNumEl.setAttribute('fill', scoreColor);
+
+    // Chat title (absent on comparisons generated before this field existed)
+    if (d.chatTitle) {
+      var chatTitleEl = document.getElementById('chatTitle');
+      chatTitleEl.textContent = d.chatTitle;
+      chatTitleEl.style.display = '';
+    }
 
     // Interpretation
     document.getElementById('interpretation').textContent = cmp.interpretation || '';
@@ -139,41 +165,61 @@
     document.getElementById('ai2Header').textContent = ai2Name;
 
     // Build theme rows
-    var allPoints = [];
+    var agreementItems = [];
     (cmp.agreements || []).forEach(function (a) {
       // Support both object {title, text} and legacy string format
       if (typeof a === 'object' && a.title) {
-        allPoints.push({ text: a.text || '', title: a.title, type: 'agree' });
+        agreementItems.push({ text: a.text || '', title: a.title, type: 'agree', quoteA: a.quote_a, quoteB: a.quote_b });
       } else {
-        allPoints.push({ text: a, title: null, type: 'agree' });
+        agreementItems.push({ text: a, title: null, type: 'agree' });
       }
     });
+    var divergenceItems = [];
     (cmp.divergences || []).forEach(function (dv) {
       if (typeof dv === 'object' && dv.title) {
-        allPoints.push({ text: dv.text || '', title: dv.title, type: 'differ' });
+        divergenceItems.push({ text: dv.text || '', title: dv.title, type: 'differ', quoteA: dv.quote_a, quoteB: dv.quote_b });
       } else {
-        allPoints.push({ text: dv, title: null, type: 'differ' });
+        divergenceItems.push({ text: dv, title: null, type: 'differ' });
       }
     });
-    var themes = allPoints.slice(0, 5);
+    // Show every agreement and divergence — previously this list was capped
+    // at 5 combined items, so any comparison with more than 5 total points
+    // (e.g. 8 agreements+divergences) silently dropped the rest, regardless
+    // of ordering. All agreements first, then all divergences (matches the
+    // grouped layout used in the popup's own results view).
+    var allPoints = agreementItems.concat(divergenceItems);
+    var themes = allPoints;
 
     var usedSentences1 = new Set();
     var usedSentences2 = new Set();
-    var rowsHtml = themes.map(function (item) {
+    var rowsData = themes.map(function (item) {
       var parts = item.title
         ? { title: item.title, summary: item.text }
         : soSplitTitleBody(item.text);
-      var q1 = soFindRelevantQuote(d.originalBrief, parts.title, parts.summary, usedSentences1);
-      var q2 = soFindRelevantQuote(d.secondOpinion, parts.title, parts.summary, usedSentences2);
-      var tagColor = item.type === 'agree' ? '#16a34a' : '#dc2626';
-      var tagBg = item.type === 'agree' ? '#f0fdf4' : '#fef2f2';
-      var tagLabel = item.type === 'agree' ? 'Agree' : 'Differ';
+      // Prefer the model-provided quote — the model had full comprehension of
+      // both response texts when it wrote this theme. Only fall back to the
+      // heuristic when the field is entirely absent (comparison data cached
+      // before this field existed). A present-but-empty value means the model
+      // looked and found no match, which should show "No specific mention
+      // found." below, not trigger the heuristic.
+      var q1 = (typeof item.quoteA !== 'undefined')
+        ? (item.quoteA || '')
+        : soFindRelevantQuote(d.originalBrief, parts.title, parts.summary, usedSentences1);
+      var q2 = (typeof item.quoteB !== 'undefined')
+        ? (item.quoteB || '')
+        : soFindRelevantQuote(d.secondOpinion, parts.title, parts.summary, usedSentences2);
+      return { title: parts.title, summary: parts.summary, q1: q1, q2: q2, type: item.type };
+    });
+    var rowsHtml = rowsData.map(function (row) {
+      var tagColor = row.type === 'agree' ? '#16a34a' : '#dc2626';
+      var tagBg = row.type === 'agree' ? '#f0fdf4' : '#fef2f2';
+      var tagLabel = row.type === 'agree' ? 'Agree' : 'Differ';
       return '<tr>' +
-        '<td class="theme-cell"><strong>' + escHtml(parts.title) + '</strong>' +
+        '<td class="theme-cell"><strong>' + escHtml(row.title) + '</strong>' +
           '<span class="theme-tag" style="color:' + tagColor + ';background:' + tagBg + '">' + tagLabel + '</span>' +
-          '<div class="theme-desc">' + escHtml(parts.summary) + '</div></td>' +
-        '<td class="quote-cell"><div class="quote-text">' + escHtml(q1 || 'No specific mention found.') + '</div></td>' +
-        '<td class="quote-cell"><div class="quote-text">' + escHtml(q2 || 'No specific mention found.') + '</div></td>' +
+          '<div class="theme-desc">' + escHtml(row.summary) + '</div></td>' +
+        '<td class="quote-cell"><div class="quote-text">' + escHtml(row.q1 || 'No specific mention found.') + '</div></td>' +
+        '<td class="quote-cell"><div class="quote-text">' + escHtml(row.q2 || 'No specific mention found.') + '</div></td>' +
       '</tr>';
     }).join('');
     document.getElementById('themeRows').innerHTML = rowsHtml;
@@ -181,6 +227,52 @@
     // Show content
     document.getElementById('loadingState').style.display = 'none';
     document.getElementById('comparisonContent').style.display = 'block';
+
+    // Print / Download
+    function doPrint() {
+      window.print();
+    }
+    function doDownload() {
+      var mdEsc = function (s) { return (s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' '); };
+      var lines = [];
+      if (d.chatTitle) {
+        lines.push('# ' + mdEsc(d.chatTitle), '', '## Second Opinion Comparison', '');
+      } else {
+        lines.push('# Second Opinion Comparison', '');
+      }
+      lines.push('**Agreement Score:** ' + score + '%', '');
+      if (cmp.interpretation) {
+        lines.push(cmp.interpretation, '');
+      }
+      lines.push('| Theme | ' + mdEsc(ai1Name) + ' | ' + mdEsc(ai2Name) + ' |');
+      lines.push('|---|---|---|');
+      rowsData.forEach(function (row) {
+        var tagLabel = row.type === 'agree' ? 'Agree' : 'Differ';
+        var themeCell = '**' + mdEsc(row.title) + '** (' + tagLabel + ')<br>' + mdEsc(row.summary);
+        lines.push('| ' + themeCell + ' | ' + mdEsc(row.q1 || 'No specific mention found.') + ' | ' + mdEsc(row.q2 || 'No specific mention found.') + ' |');
+      });
+      var md = lines.join('\n') + '\n';
+      var blob = new Blob([md], { type: 'text/markdown' });
+      var blobUrl = URL.createObjectURL(blob);
+      chrome.downloads.download({
+        url: blobUrl,
+        filename: 'portility-second-opinion-' + new Date().toISOString().slice(0, 10) + '.md',
+        saveAs: true,
+      }, function () {
+        URL.revokeObjectURL(blobUrl);
+      });
+    }
+    document.getElementById('printBtn').addEventListener('click', doPrint);
+    document.getElementById('downloadBtn').addEventListener('click', doDownload);
+
+    // Auto-trigger print/download when opened from the popup's icon shortcuts
+    // (?action=print / ?action=download appended to this page's URL).
+    var autoAction = new URLSearchParams(location.search).get('action');
+    if (autoAction === 'print') {
+      setTimeout(doPrint, 300);
+    } else if (autoAction === 'download') {
+      doDownload();
+    }
 
     // Likert rating
     var btns = document.querySelectorAll('.likert-btn');
