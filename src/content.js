@@ -185,11 +185,19 @@
         if (contentEl || (newOverlay && attempts >= 3)) {
           clearInterval(checkInterval);
           var textContent = '';
+          // Only a genuine content element (pre/code/iframe/[class*="content"])
+          // is trustworthy as real extracted document content. A whole-overlay
+          // textContent scrape (used when no such element exists) often just
+          // grabs short UI chrome/messaging (e.g. "Can't preview this file,
+          // download to view it") for file types Claude can't render inline
+          // (Office docs, PDFs) — that must NOT be treated as real content.
+          var hasGenuineContent = false;
 
           if (contentEl && contentEl.tagName === 'IFRAME') {
-            try { textContent = contentEl.contentDocument.body.textContent || ''; } catch (e) { /* cross-origin */ }
+            try { textContent = contentEl.contentDocument.body.textContent || ''; hasGenuineContent = true; } catch (e) { /* cross-origin */ }
           } else if (contentEl) {
             textContent = contentEl.textContent || contentEl.innerText || '';
+            hasGenuineContent = true;
           } else if (newOverlay) {
             textContent = newOverlay.textContent || newOverlay.innerText || '';
           }
@@ -214,7 +222,7 @@
             }
           }, 100);
 
-          if (textContent.length > 20) {
+          if (hasGenuineContent && textContent.length > 20) {
             var mimeType = 'text/plain';
             if (/\.html?$/i.test(filename)) mimeType = 'text/html';
             else if (/\.css$/i.test(filename)) mimeType = 'text/css';
@@ -228,7 +236,10 @@
             console.log('[Portility] Extracted', textContent.length, 'chars from file preview');
             resolve({ dataUrl: dataUrl, downloadUrl: downloadUrl });
           } else if (downloadUrl) {
-            console.log('[Portility] No text preview, but found download link in overlay');
+            // No genuine content element (or its text was too short) — prefer
+            // the real download link over any generic whole-overlay text scrape,
+            // since that scrape may just be UI chrome, not real file content.
+            console.log('[Portility] No genuine text preview, but found download link in overlay');
             resolve({ dataUrl: null, downloadUrl: downloadUrl });
           } else {
             console.log('[Portility] Preview content too small:', textContent.length, 'chars, no download link found');

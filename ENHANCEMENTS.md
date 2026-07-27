@@ -16,3 +16,6 @@
 
 ## PMC Pro Downloads
 - **Zip file for image-containing briefs**: When a PMC Pro download includes selected images, produce a `.zip` containing the markdown brief plus the image files, instead of a single `.md` with embedded base64. Smaller file size, easier to share, and images can be opened/previewed independently.
+
+## Analytics
+- **Capture chat title in PostHog**: Send the conversation title (from the AI platform's UI) as a PostHog event property for product analytics — e.g., topic clustering, understanding what conversations get ported/second-opinioned most. Requires: privacy policy Analytics section update (currently states no conversation content is sent to PostHog), Chrome Web Store Data Use Disclosure update (Website content → also used for Analytics), and a new package version/review cycle since it touches content scripts. No new permissions needed (posthog.com already an allowed host).

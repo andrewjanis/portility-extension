@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help & FAQ - Portility AI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background-color: #ffffff;
+            color: #333333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0 30px 0;
+            border-bottom: 2px solid #00BCD4;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 600;
+            color: #00BCD4;
+        }
+
+        .logo span {
+            color: #7B1FA2;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: #999999;
+            margin-top: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 32px 0 16px 0;
+            padding-top: 16px;
+        }
+
+        h1:first-of-type {
+            margin-top: 0;
+            padding-top: 0;
+        }
+
+        h2 {
+            font-size: 17px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 20px 0 8px 0;
+        }
+
+        p {
+            margin-bottom: 16px;
+            font-size: 15px;
+        }
+
+        ul, ol {
+            margin-left: 20px;
+            margin-bottom: 16px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+
+        strong {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .toc {
+            background-color: #f5f5f5;
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .toc p {
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .toc ul {
+            margin-bottom: 0;
+        }
+
+        .toc li {
+            margin-bottom: 4px;
+        }
+
+        .toc a {
+            font-size: 14px;
+        }
+
+        .contact-info {
+            background-color: #f5f5f5;
+            padding: 16px;
+            border-left: 4px solid #00BCD4;
+            margin-top: 32px;
+            border-radius: 4px;
+        }
+
+        .contact-info p {
+            margin-bottom: 0;
+        }
+
+        a {
+            color: #00BCD4;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        footer {
+            margin-top: 48px;
+            padding-top: 24px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            font-size: 13px;
+            color: #999999;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 16px;
+            }
+
+            header {
+                padding: 30px 0 20px 0;
+                margin-bottom: 30px;
+            }
+
+            .logo {
+                font-size: 24px;
+            }
+
+            h1 {
+                font-size: 20px;
+                margin-top: 24px;
+            }
+
+            p, li {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Portility <span>AI</span></div>
+            <div class="subtitle">Help & FAQ</div>
+        </header>
+
+        <main>
+            <div class="toc">
+                <p>On this page</p>
+                <ul>
+                    <li><a href="#getting-started">Getting started</a></li>
+                    <li><a href="#port-my-chat">Port My Chat</a></li>
+                    <li><a href="#second-opinion">Second Opinion</a></li>
+                    <li><a href="#port-my-profile">Port My Profile</a></li>
+                    <li><a href="#account">Account & sign-in</a></li>
+                    <li><a href="#permissions">Permissions we use</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting</a></li>
+                    <li><a href="#support">Contact & support</a></li>
+                </ul>
+            </div>
+
+            <h1 id="getting-started">Getting started</h1>
+            <p>Portility is a browser extension that helps you move AI conversations between platforms, get a second opinion on any AI response, and carry your custom instructions everywhere you chat.</p>
+            <p>Supported platforms:</p>
+            <ul>
+                <li><strong>Claude</strong> (claude.ai)</li>
+                <li><strong>ChatGPT</strong> (chatgpt.com)</li>
+                <li><strong>Gemini</strong> (gemini.google.com)</li>
+            </ul>
+            <p>To use Portility, open a conversation on any supported platform, then click the Portility icon in your browser toolbar.</p>
+
+            <h1 id="port-my-chat">Port My Chat</h1>
+            <p>Port My Chat exports the conversation you're currently viewing so you can continue it on a different AI platform, with full context intact.</p>
+            <ol>
+                <li>Open a conversation on a supported platform.</li>
+                <li>Click the Portility icon, then <strong>Port My Chat</strong>.</li>
+                <li>Choose how you'd like to export it:
+                    <ul>
+                        <li><strong>Copy Conversation</strong> — copies the formatted chat to your clipboard.</li>
+                        <li><strong>Summarize</strong> — generates an AI summary of the conversation.</li>
+                        <li><strong>Save as .txt</strong> — downloads the conversation as a text file.</li>
+                    </ul>
+                </li>
+                <li>Open your destination platform, paste or upload the exported content, and continue the conversation.</li>
+            </ol>
+
+            <h1 id="second-opinion">Second Opinion</h1>
+            <p>Second Opinion sends the current conversation to a different AI model and shows you a side-by-side comparison.</p>
+            <ol>
+                <li>Open a conversation on a supported platform.</li>
+                <li>Click the Portility icon, then <strong>Second Opinion</strong>.</li>
+                <li>Choose which model you'd like the second opinion from.</li>
+                <li>Review the comparison: an agreement score, shared themes, and key differences between the two responses.</li>
+            </ol>
+            <p>Your last 20 Second Opinion comparisons are saved locally in your browser and can be revisited from <strong>Second Opinion History</strong> in the popup.</p>
+
+            <h1 id="port-my-profile">Port My Profile</h1>
+            <p>Port My Profile lets you create custom instruction profiles — for work, home, hobbies, and more — and apply them across every AI platform you use, instead of re-typing your preferences into each one.</p>
+            <ol>
+                <li>Click the Portility icon, then <strong>Port My Profile</strong>.</li>
+                <li>Create a new profile and describe how you'd like the AI to work with you.</li>
+                <li>Manage, edit, or switch between profiles (up to 5) from the Manage Port Me screen.</li>
+            </ol>
+
+            <h1 id="account">Account & sign-in</h1>
+            <p>Signing in with Google unlocks Second Opinion and custom Profiles, and syncs your saved profile data securely. Portility is currently free to use in beta — every feature is unlocked for signed-in users.</p>
+            <p>You can sign in or out at any time from the extension's Settings page.</p>
+
+            <h1 id="permissions">Permissions we use</h1>
+            <p>Portility asks for a few browser permissions so it can do its job. Here's exactly what each one is for:</p>
+            <ul>
+                <li><strong>Active tab</strong> — Lets Portility see the page you're currently on only when you click its icon, so it can tell which AI platform you're using and read the conversation you want to work with.</li>
+                <li><strong>Alarms</strong> — Lets Portility check for feature updates in the background about once an hour, so you always have the latest version without needing to reopen the extension.</li>
+                <li><strong>Clipboard write</strong> — Lets Portility copy a conversation to your clipboard when you use "Copy Conversation," so you can paste it wherever you like.</li>
+                <li><strong>Storage</strong> — Saves your preferences, sign-in status, and settings locally in your browser, so you don't have to reconfigure Portility every time you use it.</li>
+                <li><strong>Unlimited storage</strong> — Removes the default browser storage limit so your Second Opinion history and saved profiles aren't cut off as you use Portility more.</li>
+                <li><strong>Tabs</strong> — Lets Portility recognize which AI platform's tab is open, and open a new tab for you when you're porting a conversation to a different platform.</li>
+                <li><strong>Downloads</strong> — Lets you save an exported conversation to your device as a text file.</li>
+                <li><strong>Scripting</strong> — Lets Portility read the conversation on the page you're exporting from, and paste it into the page you're porting to.</li>
+                <li><strong>Identity</strong> — Used for signing in with your Google account, and for the optional Google Drive backup feature.</li>
+            </ul>
+            <p>Portility never reads or accesses your conversations on pages other than the supported AI platforms, and never sells your data. See our <a href="https://portility.ai/privacy">Privacy Policy</a> for full details.</p>
+
+            <h1 id="troubleshooting">Troubleshooting</h1>
+
+            <h2>"This page isn't supported" or the Portility icon doesn't do anything</h2>
+            <p>Portility only works on the conversation pages of claude.ai, chatgpt.com, and gemini.google.com. Make sure you're on an active conversation (not a blank homepage) and try refreshing the tab.</p>
+
+            <h2>A feature looks locked</h2>
+            <p>Make sure you're signed in — Second Opinion and Port My Profile require a Google sign-in. If you're already signed in and still see a lock, try signing out and back in from Settings.</p>
+
+            <h2>Export or Second Opinion doesn't seem to work</h2>
+            <p>Refresh the page and try again. If the conversation is very long or contains images/attachments, processing may take a few extra seconds.</p>
+
+            <h2>Sign-in isn't working</h2>
+            <p>Make sure pop-ups aren't blocked for the sign-in window, and that you're signed into the correct Google account in your browser.</p>
+
+            <h1 id="support">Contact & support</h1>
+            <p>Found a bug or have a feature idea? Use the <strong>Report a bug</strong> or <strong>Request a feature</strong> links at the bottom of the Portility popup — these go straight to our team.</p>
+            <div class="contact-info">
+                <p>For anything else, reach us at: <strong><a href="mailto:support@portility.ai">support@portility.ai</a></strong></p>
+            </div>
+            <p style="margin-top: 16px;">See our <a href="https://portility.ai/privacy">Privacy Policy</a> for details on how your data is handled.</p>
+        </main>
+
+        <footer>
+            <p>Last updated: July 2026</p>
+        </footer>
+    </div>
+</body>
+</html>
