@@ -256,6 +256,13 @@ function fetchAndCloseTab(tabId, url, sendResponse) {
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   const tabId = sender && sender.tab && sender.tab.id;
 
+  if (message.type === 'OPEN_POPUP_FOR_ACTION') {
+    chrome.action.openPopup().catch(function (err) {
+      console.warn('[Portility] openPopup failed:', err);
+    });
+    return false; // no async response needed
+  }
+
   if (message.type === 'CHECK_DRIVE_AUTH') {
     console.log('[BG] CHECK_DRIVE_AUTH received');
     checkGDriveAuthBg()

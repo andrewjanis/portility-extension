@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Portility Settings</title>
+  <link rel="stylesheet" href="styles/options.css">
+</head>
+<body>
+  <div class="page-header-row">
+    <h1>Settings</h1>
+    <a class="help-icon-link" href="http://portility.ai/help" target="_blank" rel="noopener" title="Help"><span class="help-icon-glyph"></span></a>
+  </div>
+
+  <!-- Image Quality -->
+  <div class="section" id="imageQualitySection">
+    <div class="section-title">Image Quality</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Compress images for destination</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="compressToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">Reduces image size before sending to the destination. Saves your tokens but lowers image detail.</div>
+    <div class="section-description" style="margin-top:6px;font-size:11px;color:#6b7280;line-height:1.5;">
+      <strong>Turn this on for:</strong> faster answers, less AI use.<br>
+      <strong>Turn this off for:</strong> image work where you want to maintain the full fidelity of the image.
+    </div>
+  </div>
+
+  <!-- Port Text Mode -->
+  <div class="section" id="portTextModeSection">
+    <div class="section-title">Port Text Mode</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Summarize text</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="portTextModeToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">When enabled, generates an AI summary instead of porting the full conversation text.</div>
+  </div>
+
+  <!-- Floating Widget -->
+  <div class="section" id="floatingWidgetSection">
+    <div class="toggle-row">
+      <span class="toggle-label">Show floating button on chat pages</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="floatingWidgetToggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">Adds a small Portility bubble to claude.ai, chatgpt.com, and gemini.google.com for quick access to your tools.</div>
+  </div>
+
+  <!-- Port My Profile -->
+  <div class="section">
+    <div class="section-title">Port My Profile</div>
+    <div class="section-description">Manage your AI operating instructions and profiles.</div>
+    <button id="managePortMeBtn" class="btn-primary-sm">Manage Port My Profile</button>
+  </div>
+
+  <!-- Second Opinion History -->
+  <div class="section" id="soHistorySection">
+    <div class="section-title">Second Opinion History</div>
+    <div class="section-description">Your last 20 comparisons are stored locally.</div>
+    <button id="viewSOHistoryBtn" class="btn-primary-sm">View History</button>
+  </div>
+
+  <!-- Billing -->
+  <div class="section" id="billingSection">
+    <div class="section-title">Billing (coming soon)</div>
+    <div id="billingContent">
+      <div class="section-description">Manage your subscription and payment details.</div>
+      <button id="manageBillingBtn" class="btn-primary-sm">Manage Billing</button>
+    </div>
+  </div>
+
+  <!-- Usage -->
+  <div class="section" id="usageSection">
+    <div class="section-title">Usage</div>
+    <div id="usageSummary" class="section-description"></div>
+    <div id="usageHistory"></div>
+  </div>
+
+  <!-- Backup -->
+  <div class="section locked" id="backupSection">
+    <div class="section-title">Backup (coming soon)</div>
+    <div class="toggle-row">
+      <span class="toggle-label">Back up assets to Google Drive</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="driveBackupToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="section-description">When enabled, copies of your images and files are saved to a Google Drive folder as backup. (You must be signed in to your Google account)</div>
+    <div id="driveStatus" class="drive-status">
+      <span class="status-dot"></span>
+      <span>Connected</span>
+      <a id="driveFilesLink" href="#" class="drive-files-link">see your files</a>
+      <button id="driveDisconnectBtn" class="disconnect-link">Disconnect</button>
+    </div>
+  </div>
+
+  <!-- DEV: Tier Toggle — KEEP THIS SECTION, hidden by default. Unhide for testing via devtools: document.getElementById('devTierSection').style.display='' -->
+  <div class="section" id="devTierSection" style="border:2px dashed #f97316;display:none;">
+    <div class="section-title" style="color:#f97316;">DEV: Tier Override</div>
+    <div id="devTierRadios" style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="none" checked> None
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="free"> Free
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid"> Pro
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid2"> Premium
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="devTier" value="paid3"> Unlimited
+      </label>
+    </div>
+    <div class="section-description">Select a tier for testing. "None" uses the real Firestore tier. Reopen the popup after switching.</div>
+  </div>
+
+  <!-- Account -->
+  <div class="section" id="accountSection" style="display:none;">
+    <div class="section-title">Account</div>
+    <button id="signOutBtn" class="btn-danger">Log Out</button>
+  </div>
+
+  <div id="versionLabel" style="text-align:center;font-size:11px;color:#9ca3af;padding:16px 0 8px;"></div>
+
+  <script src="oauth.js"></script>
+  <script src="firestore.js"></script>
+  <script src="indexeddb.js"></script>
+  <script src="usage.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

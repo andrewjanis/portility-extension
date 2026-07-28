@@ -205,6 +205,17 @@ document.addEventListener('DOMContentLoaded', function () {
     chrome.storage.local.set({ portility_pmc_text_mode: mode });
   });
 
+  // ─── Floating widget toggle ──────────────────────────────────────────────
+  var floatingWidgetToggle = document.getElementById('floatingWidgetToggle');
+  if (floatingWidgetToggle) {
+    chrome.storage.local.get('portility_floating_widget_enabled', function (result) {
+      floatingWidgetToggle.checked = result.portility_floating_widget_enabled !== false;
+    });
+    floatingWidgetToggle.addEventListener('change', function () {
+      chrome.storage.local.set({ portility_floating_widget_enabled: floatingWidgetToggle.checked });
+    });
+  }
+
   // ─── Manage Port Me ──────────────────────────────────────────────────────
   if (managePortMeBtn) {
     managePortMeBtn.addEventListener('click', function () {

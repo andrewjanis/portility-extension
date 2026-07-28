@@ -328,6 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const includeProfileLabel = document.getElementById('includeProfileLabel');
   const includeProfileCheckbox = document.getElementById('includeProfileCheckbox');
   const profileSelect = document.getElementById('profileSelect');
+  const createProfileLink = document.getElementById('createProfileLink');
 
   // ── Questionnaire elements ────────────────────────────────────────────────
   const questionnaireEl = document.getElementById('questionnaire');
@@ -623,6 +624,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let _portMode = 'chat'; // 'chat', 'instructions', 'pro_brief', or 'pmc_pro'
   let _decryptedInstructions = null;
 
+  // Set while the "+ Add new profile" path is launched from the Port My Chat
+  // screen2 dropdown/link, so the profile-creation flow knows to return to
+  // screen2 (pmc_pro) afterward instead of the normal "Port My Profile" path.
+  let _profileCreateReturnToPmc = false;
+  var PMC_ADD_NEW_PROFILE_VALUE = '__portility_add_new_profile__';
+
   // ── Pending auth for recordUse after successful port ─────────────────
   let _pendingAuth = null;
   let _pendingFeature = null;
@@ -651,31 +658,58 @@ document.addEventListener('DOMContentLoaded', () => {
   // Persist on change
   includeProfileCheckbox.addEventListener('change', function () {
     profileSelect.disabled = !includeProfileCheckbox.checked;
+    createProfileLink.disabled = !includeProfileCheckbox.checked;
     savePmcSettings();
   });
-  profileSelect.addEventListener('change', savePmcSettings);
+  profileSelect.addEventListener('change', function () {
+    if (profileSelect.value === PMC_ADD_NEW_PROFILE_VALUE) {
+      launchProfileCreationFromPmc();
+      return;
+    }
+    savePmcSettings();
+  });
+  createProfileLink.addEventListener('click', launchProfileCreationFromPmc);
+
+  /**
+   * Launch the profile-creation flow from the Port My Chat screen2 dropdown
+   * (either the "+ Add new profile" option or the "+ Create a profile" link
+   * shown when the user has no saved profiles yet). Marks state so the flow
+   * returns to screen2 (pmc_pro) instead of the "Port My Profile" path.
+   */
+  function launchProfileCreationFromPmc() {
+    _profileCreateReturnToPmc = true;
+    crumb('pmc_add_new_profile');
+    showProfileScreen('profileTypeScreen');
+  }
 
   /**
    * Populate the profile dropdown with user's profiles.
    * Selects the saved profile or falls back to default/first.
+   * If there are no saved profiles, the dropdown is replaced by a
+   * "+ Create a profile" link. Otherwise a final "+ Add new profile" option
+   * is appended after the real profiles.
    */
   function populateProfileDropdown(profiles) {
     profileSelect.innerHTML = '';
     if (!profiles || profiles.length === 0) {
-      var opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'No profiles';
-      profileSelect.appendChild(opt);
-      profileSelect.disabled = true;
+      profileSelect.style.display = 'none';
+      createProfileLink.style.display = 'inline';
+      createProfileLink.disabled = !includeProfileCheckbox.checked;
       return;
     }
+    profileSelect.style.display = '';
+    createProfileLink.style.display = 'none';
     for (var i = 0; i < profiles.length; i++) {
       var p = profiles[i];
-      opt = document.createElement('option');
+      var opt = document.createElement('option');
       opt.value = p.id;
       opt.textContent = p.name || (p.type + ' profile');
       profileSelect.appendChild(opt);
     }
+    var addNewOpt = document.createElement('option');
+    addNewOpt.value = PMC_ADD_NEW_PROFILE_VALUE;
+    addNewOpt.textContent = '+ Add new profile';
+    profileSelect.appendChild(addNewOpt);
     // Apply saved selection or default
     chrome.storage.local.get(PMC_SETTINGS_KEY, function (data) {
       var s = data[PMC_SETTINGS_KEY];
@@ -1873,7 +1907,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   profileTypeBackBtn.addEventListener('click', function () {
-    if (_cachedProfiles && _cachedProfiles.length > 0) {
+    if (_profileCreateReturnToPmc) {
+      _profileCreateReturnToPmc = false;
+      exitProfileScreens();
+      showScreen('screen2');
+    } else if (_cachedProfiles && _cachedProfiles.length > 0) {
       renderProfilePicker(_cachedProfiles);
       showProfileScreen('profilePicker');
     } else {
@@ -2028,6 +2066,24 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ questionnaire_completed: true }, resolve);
       });
 
+      if (_profileCreateReturnToPmc) {
+        // Created from the Port My Chat screen2 dropdown/link — return to
+        // screen2 with the new profile selected, instead of the "Port My
+        // Profile" instructions path.
+        _profileCreateReturnToPmc = false;
+        if (!_cachedProfiles) _cachedProfiles = [];
+        _cachedProfiles.push(profile);
+        var pmcSettings = { includeProfile: true, selectedProfileId: profile.id };
+        await new Promise(function (resolve) {
+          chrome.storage.local.set({ [PMC_SETTINGS_KEY]: pmcSettings }, resolve);
+        });
+        populateProfileDropdown(_cachedProfiles);
+        includeProfileCheckbox.checked = true;
+        exitProfileScreens();
+        showScreen('screen2');
+        return;
+      }
+
       // Port with the new profile
       await portWithProfile(profile, auth);
     } catch (err) {
@@ -2172,6 +2228,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       setStatus('');
     });
+  });
+
+  // ── Floating widget hand-off: auto-click the tool requested from the ──────
+  // in-page floating menu (see floating-widget.js), instead of landing on
+  // the generic screen1 tool list.
+  chrome.storage.local.get('portility_pending_tool_action', function (data) {
+    var action = data.portility_pending_tool_action;
+    if (!action) return;
+    chrome.storage.local.remove('portility_pending_tool_action');
+    var paidVisible = paidButtonsDiv && paidButtonsDiv.style.display !== 'none';
+    var target = null;
+    if (action === 'port_chat') target = paidVisible ? proChatBtn : copyBtn;
+    else if (action === 'port_profile') target = paidVisible ? portInstructionsBtn : portInstructionsBtnFree;
+    else if (action === 'second_opinion') target = paidVisible ? secondOpinionBtn : null; // no free equivalent; fall through to screen1
+    if (!target) return;
+
+    // All three tools route away from screen1 (screen2, a profile-*-active
+    // body class, or the Second Opinion results panel) only after an async
+    // auth check, so screen1's button list would otherwise flash visible in
+    // the meantime. Hide it immediately and let the click handler's own
+    // screen switch take over.
+    screen1.style.display = 'none';
+    target.click();
+    // Safety net: if the click handler bailed out (e.g. auth/usage error)
+    // without switching to another screen, restore screen1 so its status
+    // message is visible again instead of leaving a blank popup.
+    setTimeout(function () {
+      var otherScreenActive = screen2.style.display === 'block'
+        || soResultsEl.style.display === 'block'
+        || /(^|\s)(profile-\w+-active|questionnaire-active)(\s|$)/.test(document.body.className);
+      if (screen1.style.display === 'none' && !otherScreenActive) {
+        screen1.style.display = '';
+      }
+    }, 4000);
   });
 
   // ─── Port Your Conversation button → show Screen 2 ────────────────────────

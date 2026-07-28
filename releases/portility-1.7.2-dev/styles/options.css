@@ -1,0 +1,325 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  max-width: 480px;
+  margin: 40px auto;
+  padding: 0 24px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: #fff;
+  color: #111;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111;
+}
+
+.page-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+.help-icon-link {
+  display: inline-flex;
+  align-items: center;
+  color: #9ca3af;
+  transition: color 0.2s;
+  text-decoration: none;
+  line-height: 0;
+}
+.help-icon-link:hover { color: #6b7280; }
+.help-icon-link .help-icon-glyph {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: url('../icons/help-icon.png') center / contain no-repeat;
+  mask: url('../icons/help-icon.png') center / contain no-repeat;
+}
+
+.section {
+  margin-bottom: 28px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111;
+  margin-bottom: 12px;
+}
+
+.section-description {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+/* ── Toggle switch (iOS-style) ───────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #d1d5db;
+  border-radius: 24px;
+  transition: background 0.25s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: linear-gradient(135deg, #14B8A6, #4ADE80);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+}
+
+/* ── Drive status ────────────────────────────────────────────────── */
+.drive-status {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.drive-status.visible {
+  display: flex;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.disconnect-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: #9ca3af;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+  margin-left: 8px;
+}
+
+.disconnect-link:hover { color: #6b7280; }
+
+.drive-files-link {
+  font-size: 12px;
+  color: #14b8a6;
+  text-decoration: none;
+  margin-left: 10px;
+  cursor: pointer;
+}
+.drive-files-link:hover { text-decoration: underline; }
+
+/* ── Danger button ───────────────────────────────────────────────── */
+.btn-danger {
+  padding: 8px 20px;
+  background: #fff;
+  color: #dc2626;
+  border: 1.5px solid #dc2626;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  margin-top: 12px;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+/* ── Primary small button ────────────────────────────────────────── */
+.btn-primary-sm {
+  padding: 8px 20px;
+  background: #fff;
+  color: #14B8A6;
+  border: 1.5px solid #14B8A6;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  margin-top: 12px;
+}
+
+.btn-primary-sm:hover {
+  background: #14B8A6;
+  color: #fff;
+}
+
+/* ── Locked / paid gating ───────────────────────────────────────── */
+.locked {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.paid-label {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-left: 6px;
+}
+
+/* ── SO History ─────────────────────────────────────────────────── */
+.so-history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.so-history-empty {
+  font-size: 12px;
+  color: #9ca3af;
+  padding: 8px 0;
+}
+
+.so-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.so-history-row:last-child {
+  border-bottom: none;
+}
+
+.so-history-date {
+  font-size: 12px;
+  color: #6b7280;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.so-history-platform {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  justify-content: center;
+}
+
+.so-history-platform svg {
+  display: block;
+}
+
+.so-history-score {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.so-score-conflict {
+  background: #FEE2E2;
+  color: #A93226;
+}
+
+.so-score-mixed {
+  background: #FEF9C3;
+  color: #B7950B;
+}
+
+.so-score-agrees {
+  background: #DCFCE7;
+  color: #1E8449;
+}
+
+.so-history-type {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 0.5px solid;
+  flex-shrink: 0;
+}
+
+.so-type-factual {
+  background: #E6F1FB;
+  color: #185FA5;
+  border-color: #B5D4F4;
+}
+
+.so-type-subjective {
+  background: #EEEDFE;
+  color: #534AB7;
+  border-color: #CECBF6;
+}
+
+.so-type-analytical {
+  background: #E1F5EE;
+  color: #0F6E56;
+  border-color: #9FE1CB;
+}
+
+/* ── Usage History ────────────────────────────────────────────── */
+.usage-history-row {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 0;
+}

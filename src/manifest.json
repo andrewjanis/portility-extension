@@ -41,17 +41,17 @@
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "content.js"],
+      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "floating-widget.js", "content.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "content-chatgpt.js"],
+      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "floating-widget.js", "content-chatgpt.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "content-gemini.js"],
+      "js": ["posthog.js", "port-my-chat-prompts.js", "remote-config.js", "content-shared.js", "floating-widget.js", "content-gemini.js"],
       "run_at": "document_idle"
     }
   ],
@@ -69,5 +69,11 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/floating-button.png"],
+      "matches": ["https://claude.ai/*", "https://chatgpt.com/*", "https://gemini.google.com/*"]
+    }
+  ],
   "options_page": "options.html"
 }
