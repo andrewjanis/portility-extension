@@ -237,6 +237,8 @@
       var rect = composer.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return null;
       var node = composer;
+      var best = null;
+      var bestNode = null;
       for (var i = 0; i < 10 && node.parentElement; i++) {
         node = node.parentElement;
         var nrect = node.getBoundingClientRect();
@@ -249,9 +251,17 @@
         var bg = cs.backgroundColor || '';
         var isTransparent = bg === 'transparent' || /rgba\([^)]*,\s*0\s*\)/.test(bg) || bg === '';
         if (radius >= 10 && !isTransparent) {
-          return extendPastDisclaimer(nrect, node);
+          // Don't stop at the first match — keep climbing. ChatGPT's mic/
+          // voice-mode toolbar row can live below an inner rounded/opaque
+          // segment (e.g. just the text row), still nested inside a larger
+          // rounded card. Stopping early anchors the bubble on top of that
+          // outer toolbar. Track the outermost valid match instead, still
+          // bounded by the bail-out size checks above.
+          best = nrect;
+          bestNode = node;
         }
       }
+      if (best) return extendPastDisclaimer(best, bestNode);
       return rect;
     }
 
