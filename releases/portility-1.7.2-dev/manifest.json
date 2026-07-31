@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Portility DEV",
   "version": "1.7.2",
-  "description": "Easily move conversations between AI platforms. Get a second opinion from Claude, ChatGPT, or Gemini in one click.",
+  "description": "Portility is the usability layer above today's AI platforms, making it easy to move conversations and context anywhere.",
   "permissions": [
     "activeTab",
     "alarms",
