@@ -327,9 +327,16 @@
 
     .include-profile-row {
       display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .profile-select-row {
+      display: flex;
       align-items: center;
       gap: 8px;
-      margin-top: 8px;
     }
 
     .include-profile-checkbox-label {
@@ -352,7 +359,7 @@
       min-width: 0;
       font-size: 11px;
       font-family: 'Nunito', sans-serif;
-      padding: 3px 6px;
+      padding: 3px 20px 3px 6px;
       border: 1px solid #d1d5db;
       border-radius: 6px;
       background: #fff;
@@ -360,6 +367,9 @@
       cursor: pointer;
       outline: none;
       transition: border-color 0.15s;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow: hidden;
     }
 
     .profile-select:focus {
@@ -984,7 +994,7 @@
     <div id="paid-buttons">
       <button id="proChatBtn" class="btn-primary"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Chat Pro</button>
       <button id="portInstructionsBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Port My Profile</button>
-      <button id="secondOpinionBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="17" r=".5" fill="#0D9488" stroke="#0D9488"/></svg>Second Opinion</button>
+      <button id="secondOpinionBtn" class="btn-primary" style="margin-top:8px;"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12,12 L4.93,19.07 A10,10 0 0,1 4.93,4.93 Z" fill="#41f531"/><path d="M12,12 L4.93,4.93 A10,10 0 0,1 19.07,4.93 Z" fill="#FFD348"/><path d="M12,12 L19.07,4.93 A10,10 0 0,1 19.07,19.07 Z" fill="#fa000c"/></svg>Second Opinion</button>
     </div>
     <div id="status"></div>
     <div id="portStatus"></div>
@@ -1137,8 +1147,10 @@
         <input type="checkbox" id="includeProfileCheckbox" checked>
         Include My Profile
       </label>
-      <select id="profileSelect" class="profile-select"></select>
-      <button type="button" id="createProfileLink" class="link-btn" style="display:none;">+ Create a profile</button>
+      <div class="profile-select-row">
+        <select id="profileSelect" class="profile-select"></select>
+        <button type="button" id="createProfileLink" class="link-btn" style="display:none;">+ Create a profile</button>
+      </div>
     </div>
 
     <div id="includeImagesLabel" class="include-profile-row" style="display:none;">

@@ -121,7 +121,7 @@
     // opinion) via increasing transition-delay.
     var ICON_CHAT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_PROFILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="7" r="4" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    var ICON_SECOND_OPINION = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="' + ACCENT_COLOR + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="17" r=".5" fill="' + ACCENT_COLOR + '" stroke="' + ACCENT_COLOR + '"/></svg>';
+    var ICON_SECOND_OPINION = '<svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12,12 L4.93,19.07 A10,10 0 0,1 4.93,4.93 Z" fill="#41f531"/><path d="M12,12 L4.93,4.93 A10,10 0 0,1 19.07,4.93 Z" fill="#FFD348"/><path d="M12,12 L19.07,4.93 A10,10 0 0,1 19.07,19.07 Z" fill="#fa000c"/></svg>';
 
     var ITEMS = [
       { action: 'port_chat', label: 'Port My Chat', icon: ICON_CHAT, dx: -130, dy: -60, delay: 0 },
@@ -208,6 +208,29 @@
     // climb ancestors looking for the nearest one styled like the visible
     // rounded white/opaque card (border-radius + opaque background) and
     // anchor to that.
+    // Claude renders a small "Claude is AI and can make mistakes..." disclaimer
+    // as a sibling directly below the composer card. It sits close enough to
+    // the card that anchoring purely to the card's bottom leaves the bubble
+    // landing right on top of it (little to no viewport room past the card).
+    // Widen the returned rect to include that sibling's bottom edge when present
+    // so the bubble anchors below the disclaimer instead of overlapping it.
+    function extendPastDisclaimer(rect, cardNode) {
+      var container = cardNode && cardNode.parentElement;
+      if (!container) return rect;
+      var kids = container.children;
+      for (var i = 0; i < kids.length; i++) {
+        var kid = kids[i];
+        if (kid === cardNode) continue;
+        var text = kid.textContent || '';
+        if (!/can make mistakes|double.?check/i.test(text)) continue;
+        var krect = kid.getBoundingClientRect();
+        if (krect.width > 0 && krect.height > 0 && krect.bottom > rect.bottom) {
+          return { top: rect.top, left: rect.left, right: rect.right, bottom: krect.bottom };
+        }
+      }
+      return rect;
+    }
+
     function findComposerCardRect() {
       var composer = findComposer();
       if (!composer) return null;
@@ -226,7 +249,7 @@
         var bg = cs.backgroundColor || '';
         var isTransparent = bg === 'transparent' || /rgba\([^)]*,\s*0\s*\)/.test(bg) || bg === '';
         if (radius >= 10 && !isTransparent) {
-          return nrect;
+          return extendPastDisclaimer(nrect, node);
         }
       }
       return rect;
@@ -234,15 +257,28 @@
 
     function positionHost() {
       var rowRect = findComposerCardRect();
-      var gapBelow = 14;
+      var gap = 14;
       if (rowRect) {
         // CSS `bottom` sets the distance from the viewport bottom to the
         // host's OWN bottom edge — it does not account for the host's
         // height, so without subtracting it the 48px-tall bubble extended
-        // upward from a point only gapBelow past the row's bottom, overlapping
+        // upward from a point only gap past the row's bottom, overlapping
         // most of the input pill instead of sitting fully below it.
         var hostHeight = host.getBoundingClientRect().height || 48;
-        var bottom = Math.max(12, window.innerHeight - rowRect.bottom - gapBelow - hostHeight);
+        var spaceBelow = window.innerHeight - rowRect.bottom;
+        var bottom;
+        if (spaceBelow >= gap + hostHeight) {
+          bottom = spaceBelow - gap - hostHeight;
+        } else {
+          // Not enough room below the card (e.g. Claude's disclaimer footer
+          // leaves too little clearance before the viewport edge, even after
+          // extendPastDisclaimer widens the avoid-zone) — anchor above the
+          // card instead, in the scrollable message area, rather than
+          // clamping to the viewport edge and overlapping the card/footer.
+          bottom = window.innerHeight - rowRect.top + gap;
+          bottom = Math.min(bottom, window.innerHeight - hostHeight - 12);
+        }
+        bottom = Math.max(12, bottom);
         var right = Math.max(12, window.innerWidth - rowRect.right);
         host.style.bottom = bottom + 'px';
         host.style.right = right + 'px';
