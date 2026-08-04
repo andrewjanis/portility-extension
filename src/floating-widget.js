@@ -244,8 +244,18 @@
         var nrect = node.getBoundingClientRect();
         if (nrect.width <= 0 || nrect.height <= 0) continue;
         // Bail once we're clearly past the input card into a much larger
-        // page section (e.g. the whole composer+sidebar wrapper).
-        if (nrect.height > 220 || nrect.height > rect.height + 160) break;
+        // page section (e.g. the whole composer+sidebar wrapper). Width is
+        // the reliable signal here, not height — composer cards are
+        // width-capped/centered on all three platforms regardless of screen
+        // size, but their HEIGHT legitimately varies (e.g. on a narrower Mac
+        // browser window, Gemini's toolbar row of mic/model-picker buttons
+        // wraps below the text instead of beside it, making the real card
+        // taller). A fixed height cutoff bailed out before reaching that
+        // wrapped card, leaving the bubble anchored on an inner rect that
+        // excluded the toolbar and landing right on top of the mic button.
+        if (nrect.width > window.innerWidth * 0.92) break;
+        if (nrect.width > rect.width * 2.2 && nrect.width > 700) break;
+        if (nrect.height > 340) break;
         var cs = window.getComputedStyle(node);
         var radius = parseFloat(cs.borderTopLeftRadius) || 0;
         var bg = cs.backgroundColor || '';

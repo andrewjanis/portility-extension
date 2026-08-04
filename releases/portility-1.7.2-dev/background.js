@@ -27,7 +27,7 @@
 'use strict';
 
 // ─── Load shared config & remote-config helpers ──────────────────────────────
-importScripts('config.js', 'remote-config.js');
+importScripts('config.js', 'remote-config.js', 'oauth.js');
 
 // ─── Remote config refresh (hourly via alarm) ────────────────────────────────
 var CONFIG_ALARM_NAME = 'portility_config_refresh';
@@ -261,6 +261,22 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       console.warn('[Portility] openPopup failed:', err);
     });
     return false; // no async response needed
+  }
+
+  // Run the main sign-in flow here (not in popup.js) because the extension
+  // popup auto-closes the instant the Google login window steals focus,
+  // killing popup.js's execution before it can store tokens or continue —
+  // the user logs in successfully but the popup never finds out. Running
+  // it in the service worker means the flow completes and persists tokens
+  // to chrome.storage.local regardless of whether the popup that triggered
+  // it is still open, so the *next* click succeeds instead of relaunching
+  // OAuth forever. See CHECK_DRIVE_AUTH/START_GDRIVE_AUTH below for the
+  // same pattern already used for the (separate) Drive backup auth.
+  if (message.type === 'ENSURE_AUTHENTICATED') {
+    ensureAuthenticated()
+      .then(function (auth) { sendResponse({ auth: auth }); })
+      .catch(function (err) { sendResponse({ error: err.message || String(err) }); });
+    return true; // keep channel open for async sendResponse
   }
 
   if (message.type === 'CHECK_DRIVE_AUTH') {

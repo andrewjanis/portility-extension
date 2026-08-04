@@ -1340,6 +1340,32 @@
               }, delay || 500);
             }
 
+            // pasteImages()'s callback fires as soon as the synthetic paste/drop
+            // event is dispatched and not prevented — NOT once Gemini has actually
+            // finished uploading/attaching the file. That upload is async, and if
+            // it's still in flight when doAutoSubmit's fixed delay expires, the
+            // text-only message gets sent first and the image attaches afterward
+            // (reported on Mac, likely just a slower attach path there). Instead of
+            // trusting a flat timer, poll for the attachment preview chip Gemini
+            // renders in the composer once the file is actually attached, and only
+            // submit once we can confirm it (or give up after maxWaitMs so a missed
+            // selector can't hang the send forever).
+            function waitForAttachmentThenSubmit(maxWaitMs) {
+              var waited = 0;
+              var checkInterval = setInterval(function () {
+                var preview = document.querySelector(
+                  'user-query-file-preview, user-query-file-carousel, ' +
+                  '[class*="file-preview-container"], [class*="query-file-preview"], ' +
+                  '[class*="query-file-carousel"], [class*="uploader-file-preview"]'
+                );
+                waited += 200;
+                if (preview || waited >= maxWaitMs) {
+                  clearInterval(checkInterval);
+                  doAutoSubmit(300);
+                }
+              }, 200);
+            }
+
             console.log('[Portility][Gemini] Image paste check:', {
               hasImages: hasImages,
               imageCount: images ? images.length : 0,
@@ -1375,12 +1401,12 @@
                     setTimeout(function () {
                       window.PortilityShared.pasteImages(input, remainingFiles, function () {
                         chrome.storage.local.remove('portility_pending_images');
-                        doAutoSubmit(2000);
+                        waitForAttachmentThenSubmit(8000);
                       });
                     }, 1000);
                   } else {
                     chrome.storage.local.remove('portility_pending_images');
-                    doAutoSubmit(2000);
+                    waitForAttachmentThenSubmit(8000);
                   }
                 });
               }, 300);

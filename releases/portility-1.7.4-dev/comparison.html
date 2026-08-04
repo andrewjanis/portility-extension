@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Second Opinion — Portility</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;max-width:900px;margin:0 auto;padding:0 24px 32px;color:#111;line-height:1.6}
+    .page-header{padding:20px 0 16px;border-bottom:1px solid #e5e7eb;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between}
+    .page-header img{height:32px;width:auto}
+    .help-icon-link{display:inline-flex;align-items:center;color:#9ca3af;transition:color 0.2s;text-decoration:none;line-height:0}
+    .help-icon-link:hover{color:#6b7280}
+    .help-icon-link .help-icon-glyph{display:inline-block;width:16px;height:16px;background-color:currentColor;-webkit-mask:url('icons/help-icon.png') center / contain no-repeat;mask:url('icons/help-icon.png') center / contain no-repeat}
+    .header-row{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:20px}
+    .header-left{flex:2;min-width:0}
+    .chat-title{font-size:20px;font-weight:700;color:#111;margin-bottom:6px}
+    .header-right{flex:1;min-width:0;text-align:center}
+    .score-label{font-size:13px;color:#6b7280;margin-top:2px}
+    .likert-wrap{text-align:center;margin-bottom:24px}
+    .likert-label{font-size:12px;font-weight:600;color:#374151;margin-bottom:8px}
+    .likert-row{display:flex;justify-content:center;gap:10px}
+    .likert-btn{width:36px;height:36px;border-radius:50%;border:1.5px solid #d1d5db;background:#fff;font-size:13px;font-weight:600;color:#6b7280;cursor:pointer;transition:all 0.15s}
+    .likert-btn:hover{border-color:#14b8a6;color:#0d9488;background:#f0fdfa}
+    .likert-btn.selected{border-color:#14b8a6;background:#14b8a6;color:#fff}
+    .likert-btn.submitted{pointer-events:none;opacity:0.7}
+    .likert-anchors{display:flex;justify-content:space-between;max-width:220px;margin:4px auto 0;font-size:10px;color:#9ca3af}
+    .likert-status{font-size:11px;margin-top:6px;min-height:16px}
+    .summary{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px 20px;margin-bottom:24px;font-size:14px;color:#374151;line-height:1.6}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    thead th{text-align:left;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:2px solid #e5e7eb;background:#f9fafb}
+    thead th.ai-col{width:30%}
+    tbody tr{border-bottom:1px solid #f3f4f6}
+    tbody tr:hover{background:#fafbfc}
+    .theme-cell{padding:14px;vertical-align:top;width:40%}
+    .theme-cell strong{font-size:14px;color:#111;display:block;margin-bottom:4px}
+    .theme-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;display:inline-block;margin-bottom:6px}
+    .theme-desc{font-size:12px;color:#6b7280;line-height:1.5}
+    .quote-cell{padding:14px;vertical-align:top;font-size:13px;color:#374151;line-height:1.55}
+    .quote-text{font-style:italic;color:#4b5563}
+    .loading{text-align:center;padding:80px 32px;color:#6b7280;font-size:14px}
+    .header-actions{display:flex;align-items:center;gap:12px}
+    .action-btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:#374151;background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;transition:all 0.15s}
+    .action-btn:hover{border-color:#9ca3af;background:#f9fafb}
+    @media print{
+      .header-actions,.likert-wrap,.help-icon-link{display:none !important}
+      body{max-width:none}
+      *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}
+    }
+  </style>
+</head>
+<body>
+  <div id="loadingState" class="loading">Loading comparison data...</div>
+  <div id="comparisonContent" style="display:none;">
+    <div class="page-header">
+      <a href="https://portility.ai" target="_blank" rel="noopener"><img src="icons/logo-portility-ai.png" alt="Portility AI"></a>
+      <div class="header-actions">
+        <button class="action-btn" id="printBtn" title="Print this comparison">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6v-8z" stroke="#374151" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Print
+        </button>
+        <button class="action-btn" id="downloadBtn" title="Download as Markdown">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="#374151" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download
+        </button>
+        <a class="help-icon-link" href="http://portility.ai/help" target="_blank" rel="noopener" title="Help"><span class="help-icon-glyph"></span></a>
+      </div>
+    </div>
+    <div class="header-row">
+      <div class="header-left">
+        <h1 class="chat-title" id="chatTitle" style="display:none;"></h1>
+        <div class="summary" id="interpretation"></div>
+        <div class="likert-wrap">
+          <div class="likert-label">Rate this comparison</div>
+          <div class="likert-row">
+            <button class="likert-btn" data-rating="1" title="Poor">1</button>
+            <button class="likert-btn" data-rating="2" title="Fair">2</button>
+            <button class="likert-btn" data-rating="3" title="Good">3</button>
+            <button class="likert-btn" data-rating="4" title="Very Good">4</button>
+            <button class="likert-btn" data-rating="5" title="Excellent">5</button>
+          </div>
+          <div class="likert-anchors"><span>Poor</span><span>Excellent</span></div>
+          <div class="likert-status" id="likertStatus"></div>
+        </div>
+      </div>
+      <div class="header-right">
+        <svg id="scoreDial" viewBox="0 0 240 215" width="100%" role="img" aria-label="Agreement score gauge">
+          <circle cx="120" cy="115" r="90" fill="#f3f4f6"/>
+          <!-- Three solid-color arc segments (green/yellow/red) instead of a
+               single gradient-stroked arc: Chrome fails to render SVG
+               stroke="url(#gradient)" paint-server references when printing
+               (a long-standing rendering bug), which made the whole gauge —
+               the most colorful element on the page — print as plain
+               black/gray and made the page read as grayscale. Solid stroke
+               colors always print correctly. -->
+          <circle cx="120" cy="115" r="61" fill="none" stroke="#41f531" stroke-width="48"
+            stroke-dasharray="85.17 298.11" stroke-dashoffset="0" transform="rotate(150,120,115)"/>
+          <circle cx="120" cy="115" r="61" fill="none" stroke="#FFD348" stroke-width="48"
+            stroke-dasharray="85.17 298.11" stroke-dashoffset="-85.17" transform="rotate(150,120,115)"/>
+          <circle cx="120" cy="115" r="61" fill="none" stroke="#fa000c" stroke-width="48"
+            stroke-dasharray="85.17 298.11" stroke-dashoffset="-170.34" transform="rotate(150,120,115)"/>
+          <circle cx="120" cy="115" r="61" fill="none" stroke="#ffffff" stroke-width="50"
+            stroke-dasharray="127.76 255.51" transform="rotate(30,120,115)"/>
+          <line x1="120" y1="115" x2="42.1"  y2="160" stroke="#ffffff" stroke-width="1.5" opacity="0.6"/>
+          <line x1="120" y1="115" x2="197.9" y2="160" stroke="#ffffff" stroke-width="1.5" opacity="0.6"/>
+          <circle cx="120" cy="115" r="90" fill="none" stroke="#e5e7eb" stroke-width="0.5"/>
+          <text x="55"  y="108" font-size="11" font-weight="500" fill="#C0392B" font-family="-apple-system,sans-serif" text-anchor="middle">Conflict</text>
+          <text x="120" y="50"  font-size="11" font-weight="500" fill="#D4AC0D" font-family="-apple-system,sans-serif" text-anchor="middle">Mixed</text>
+          <text x="185" y="108" font-size="11" font-weight="500" fill="#27AE60" font-family="-apple-system,sans-serif" text-anchor="middle">Agrees</text>
+          <circle cx="120" cy="115" r="40" fill="#ffffff"/>
+          <image href="icons/logo-circle.png" x="82" y="77" width="76" height="76" clip-path="circle(38px at 38px 38px)"/>
+          <circle cx="120" cy="115" r="40" fill="none" stroke="#e5e7eb" stroke-width="0.5"/>
+          <g id="scoreDialNeedle" style="transform-origin:120px 115px;transform:rotate(-120deg)">
+            <line id="scoreDialNeedleMain" x1="120" y1="115" x2="120" y2="52" stroke="#D4AC0D" stroke-width="2.5" stroke-linecap="round"/>
+            <line id="scoreDialNeedleTail" x1="120" y1="115" x2="120" y2="131" stroke="#D4AC0D" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
+          </g>
+          <circle id="scoreDialHub" cx="120" cy="115" r="6" fill="#D4AC0D"/>
+          <circle cx="120" cy="115" r="2.5" fill="#ffffff"/>
+          <text id="scoreDialNumber" x="120" y="178" font-size="40" font-weight="500" fill="#D4AC0D" font-family="-apple-system,sans-serif" text-anchor="middle" dominant-baseline="middle">—</text>
+        </svg>
+        <div class="score-label">Agreement Score</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Theme</th>
+        <th class="ai-col" id="ai1Header">AI 1</th>
+        <th class="ai-col" id="ai2Header">AI 2</th>
+      </tr></thead>
+      <tbody id="themeRows"></tbody>
+    </table>
+  </div>
+  <script src="comparison.js"></script>
+</body>
+</html>
