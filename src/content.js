@@ -35,7 +35,18 @@
 
   // The class used on Claude's AI response containers.
   // We filter querySelectorAll results to outermost matches only (BUG-005).
+  // Claude's markup has changed over time (BUG-009): the class fragment below
+  // is kept as a fallback/remote-overridable signal, but data-testid is the
+  // primary, more stable match — always included regardless of its value.
   let AI_CLASS_FRAGMENT = 'font-claude-response';
+  const AI_TESTID_SELECTOR = '[data-testid="assistant-message"]';
+
+  // Combined selector used everywhere we need to match an AI turn container.
+  // Built as a function (not a cached const) so it stays current if remote
+  // config updates AI_CLASS_FRAGMENT after this module has already loaded.
+  function aiTurnSelector() {
+    return AI_TESTID_SELECTOR + ', [class*="' + AI_CLASS_FRAGMENT + '"]';
+  }
 
   // Override selectors from remote config cache (non-blocking)
   if (window.PortilityConfig && window.PortilityConfig.getRemoteSelectors) {
@@ -109,7 +120,7 @@
       return !!(
         sib.querySelector('[data-testid="user-message"]') ||
         sib.querySelector('[data-testid="human-turn"]') ||
-        sib.querySelector('[class*="font-claude-response"]')
+        sib.querySelector(aiTurnSelector())
       );
     }
 
@@ -340,7 +351,7 @@
 
       // Determine which turn this attachment belongs to
       var turnRole = 'Human';
-      var closestAi = card.closest('[class*="' + AI_CLASS_FRAGMENT + '"]');
+      var closestAi = card.closest(aiTurnSelector());
       if (closestAi) turnRole = 'Assistant';
 
       var downloadUrl = null;
@@ -389,10 +400,10 @@
   /**
    * Find AI turn containers.
    *
-   * BUG-005: filters to outermost font-claude-response elements only.
+   * BUG-005: filters to outermost AI-turn elements only (see aiTurnSelector()).
    * BUG-007: when the grandparent card container has mixed children (e.g. a
    *          heading + bullet list siblings), returns the grandparent so that
-   *          bullets outside the font-claude-response element are captured too.
+   *          bullets outside the AI-turn element are captured too.
    * BUG-008: button elements are excluded in walk(), removing the duplicate
    *          collapse-toggle label that precedes each thinking-step's full text.
    *
@@ -400,7 +411,7 @@
    * @returns {Element[]}
    */
   function findAiTurns(scope) {
-    const selector = '[class*="' + AI_CLASS_FRAGMENT + '"]';
+    const selector = aiTurnSelector();
     const all = Array.from(scope.querySelectorAll(selector))
       .filter(isElementVisible);
 
@@ -411,7 +422,7 @@
 
     // For each outermost element, decide whether to use it directly or bubble up
     // to its grandparent.  Bubble up when the grandparent contains sibling
-    // children with text that are not themselves font-claude-response elements
+    // children with text that are not themselves AI-turn elements
     // (e.g. <ul> bullet lists sitting beside a heading) — BUG-007.
     const seen = new Set();
     const result = [];
@@ -426,8 +437,7 @@
         // Check if grandparent has children with content outside our selector
         const hasMixedContent = Array.from(grandparent.children).some(child => {
           if (child === parent) return false; // skip the element's own parent
-          const cls = child.getAttribute('class') || '';
-          if (cls.includes(AI_CLASS_FRAGMENT)) return false; // skip other response els
+          if (child.matches(selector)) return false; // skip other response els
           return (child.innerText || child.textContent || '').trim().length > 0;
         });
 

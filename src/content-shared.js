@@ -87,6 +87,13 @@
       // Skip aria-hidden elements (decorative / screen-reader duplicates)
       if (node.getAttribute('aria-hidden') === 'true') return '';
 
+      // Skip elements the platform itself marks as not real content — e.g.
+      // Claude's hidden "Claude responded: ..." sr-only accessibility summary
+      // and its collapsible "thinking" status labels both carry
+      // data-find-omitted, which is the platform's own semantic signal that
+      // these are UI chrome, not conversation content.
+      if (node.hasAttribute('data-find-omitted')) return '';
+
       const style = window.getComputedStyle(node);
 
       // Skip hidden elements
@@ -262,7 +269,7 @@
         for (var s = 0; s < siblings.length; s++) {
           if (siblings[s] === node || siblings[s] === el) continue;
           // Skip if sibling contains another conversation turn (avoid cross-turn leaking)
-          if (siblings[s].querySelector('[data-message-author-role], [data-testid="user-message"], [data-testid="human-turn"], [class*="human-turn"], [class*="font-claude-response"], .model-response-text, [data-turn-role]')) continue;
+          if (siblings[s].querySelector('[data-message-author-role], [data-testid="user-message"], [data-testid="human-turn"], [class*="human-turn"], [data-testid="assistant-message"], [class*="font-claude-response"], .model-response-text, [data-turn-role]')) continue;
           var sibImgs = siblings[s].querySelectorAll('img');
           for (var si = 0; si < sibImgs.length; si++) {
             addImg(sibImgs[si], assets.length + si);

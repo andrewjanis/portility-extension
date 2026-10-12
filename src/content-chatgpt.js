@@ -19,8 +19,13 @@
     window.PortilityShared;
 
   // ─── Selectors (overridable via remote config) ───────────────────────────
-  let HUMAN_SELECTOR = '[data-message-author-role="user"]';
-  let AI_SELECTOR = '[data-message-author-role="assistant"]';
+  // ChatGPT has rolled out newer turn DOM shapes (Sep 2026 "search-unit" layout)
+  // that drop data-message-author-role in favor of a `...:user` / `...:assistant`
+  // suffix on a different attribute. Match all known generations so extraction
+  // keeps working across accounts/experiments without waiting on a selector
+  // change to reach everyone via remote config.
+  let HUMAN_SELECTOR = '[data-message-author-role="user"], [data-content-search-unit-key$=":user"], [data-chatgpt-search-unit-key$=":user"]';
+  let AI_SELECTOR = '[data-message-author-role="assistant"], [data-content-search-unit-key$=":assistant"], [data-chatgpt-search-unit-key$=":assistant"]';
 
   // Override selectors from remote config cache (non-blocking)
   if (window.PortilityConfig && window.PortilityConfig.getRemoteSelectors) {
@@ -53,9 +58,18 @@
   }
 
   // ─── Turn finders ─────────────────────────────────────────────────────────
+  /**
+   * BUG-010: ChatGPT's current DOM nests a `data-content-search-unit-key` match
+   * inside a `data-chatgpt-search-unit-key` match for the same human turn, so
+   * HUMAN_SELECTOR's generations can both match the same visible turn. Filter
+   * to outermost matches only (mirrors content.js's AI-turn BUG-005 fix).
+   */
   function findHumanTurns(scope) {
-    return Array.from(scope.querySelectorAll(HUMAN_SELECTOR))
+    const all = Array.from(scope.querySelectorAll(HUMAN_SELECTOR))
       .filter(isElementVisible);
+    return all.filter(function (el) {
+      return !el.parentElement || !el.parentElement.closest(HUMAN_SELECTOR);
+    });
   }
 
   function findAiTurns(scope) {
