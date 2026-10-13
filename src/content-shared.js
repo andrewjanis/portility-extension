@@ -597,14 +597,16 @@
    * @returns {Promise<void>}
    */
   async function captureImageData(assets) {
-    // Assets that already have dataUrl (e.g. from platform-specific detection) don't need fetching
-    var alreadyCaptured = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.dataUrl; });
+    // Assets that already have dataUrl (e.g. from platform-specific detection) don't need fetching.
+    // Artifacts (Claude documents extracted from the artifact panel) always arrive this way —
+    // they have no URL to fetch, just pre-extracted dataUrl content.
+    var alreadyCaptured = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file' || a.type === 'artifact') && a.dataUrl; });
     var needsCapture = assets.filter(function (a) { return (a.type === 'image' || a.type === 'file') && a.url && !a.dataUrl; });
     var toCapture = needsCapture.slice(0, MAX_CAPTURE_ASSETS);
-    // File assets with neither a URL nor extracted content: we can't fetch these,
+    // File/artifact assets with neither a URL nor extracted content: we can't fetch these,
     // but still surface them (dataUrl: null) so they're visible in the picker
     // instead of silently vanishing.
-    var unresolvedFiles = assets.filter(function (a) { return a.type === 'file' && !a.url && !a.dataUrl; });
+    var unresolvedFiles = assets.filter(function (a) { return (a.type === 'file' || a.type === 'artifact') && !a.url && !a.dataUrl; });
 
     await Promise.allSettled(
       toCapture.map(function (asset) {
@@ -701,6 +703,24 @@
   function findFileInput() {
     // Search in regular DOM
     var inputs = document.querySelectorAll('input[type="file"]');
+    if (inputs.length > 1) {
+      // Multiple file inputs on the page (e.g. Gemini mounts one per
+      // "Upload & tools" menu item — Upload files, Add from Drive, etc.)
+      // Log their attributes so we can tell which one actually belongs to
+      // the conversation composer if the wrong one ever gets picked.
+      console.log('[Portility] findFileInput: ' + inputs.length + ' file input(s) found:',
+        Array.prototype.map.call(inputs, function (el, idx) {
+          return {
+            idx: idx,
+            id: el.id,
+            name: el.name,
+            accept: el.getAttribute('accept'),
+            multiple: el.hasAttribute('multiple'),
+            className: el.className,
+            parentClassName: el.parentElement ? el.parentElement.className : null,
+          };
+        }));
+    }
     // Any file input works — prefer unrestricted or broad-accept inputs first
     for (var i = 0; i < inputs.length; i++) {
       var accept = inputs[i].getAttribute('accept') || '';
@@ -722,22 +742,51 @@
 
   /**
    * Strategy 1: Find <input type="file"> and set files via DataTransfer.
+   *
+   * If the input doesn't advertise multi-file support (no `multiple` attribute),
+   * many sites' change handlers only ever read files[0] — even though we can
+   * still programmatically assign a multi-file FileList to it, the rest get
+   * silently dropped by the site's own code. In that case, upload one file at
+   * a time so each gets its own change event and a chance to attach before
+   * the next is set.
+   * @param {File[]} files
+   * @param {function(boolean):void} callback
    */
-  function tryFileInput(files) {
+  function tryFileInput(files, callback) {
     var fileInput = findFileInput();
     if (!fileInput) {
       console.log('[Portility] tryFileInput: no file input found');
-      return false;
+      callback(false);
+      return;
     }
 
-    var dt = new DataTransfer();
-    for (var j = 0; j < files.length; j++) dt.items.add(files[j]);
-    fileInput.files = dt.files;
+    if (files.length <= 1 || fileInput.hasAttribute('multiple')) {
+      var dt = new DataTransfer();
+      for (var j = 0; j < files.length; j++) dt.items.add(files[j]);
+      fileInput.files = dt.files;
 
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-    console.log('[Portility] Uploaded ' + files.length + ' file(s) via file input');
-    return true;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log('[Portility] Uploaded ' + files.length + ' file(s) via file input (single batch)');
+      callback(true);
+      return;
+    }
+
+    console.log('[Portility] File input lacks "multiple" attribute — uploading', files.length, 'file(s) sequentially');
+    var idx = 0;
+    function uploadNext() {
+      if (idx >= files.length) { callback(true); return; }
+      // Re-query in case the site swaps in a fresh input after each attachment
+      var input = findFileInput() || fileInput;
+      var dtOne = new DataTransfer();
+      dtOne.items.add(files[idx]);
+      input.files = dtOne.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      idx++;
+      setTimeout(uploadNext, 700);
+    }
+    uploadNext();
   }
 
   /**
@@ -829,24 +878,29 @@
       }
 
       // Try file input first (most reliable for all file types)
-      if (tryFileInput(files)) { callback(true); return; }
+      tryFileInput(files, function (ok) {
+        if (ok) { callback(true); return; }
 
-      // ChatGPT calls preventDefault on paste for ALL file types but only processes images.
-      // On ChatGPT, prefer drag-drop for non-image files. Other platforms (Gemini) handle
-      // non-image paste correctly, so keep paste-first for them.
-      var isChatGPT = /chatgpt\.com|chat\.openai\.com/i.test(location.hostname);
+        // trySyntheticPaste()'s "handled" signal just means the site didn't call
+        // preventDefault — it doesn't confirm the file was actually attached.
+        // ChatGPT calls preventDefault on paste for ALL file types but only
+        // processes images, and Gemini has been observed reporting "handled"
+        // for a non-image paste that didn't actually attach (dropped instead
+        // into an unrelated composer). Prefer the more verifiable drag-drop
+        // signal first for non-image files on every platform; paste remains
+        // first for images, which has been reliable.
+        if (hasNonImage) {
+          console.log('[Portility] Non-image file, trying drag-drop before paste');
+          if (tryDragDrop(inputEl, files)) { callback(true); return; }
+          if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
+        } else {
+          if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
+          if (tryDragDrop(inputEl, files)) { callback(true); return; }
+        }
 
-      if (hasNonImage && isChatGPT) {
-        console.log('[Portility] Non-image file on ChatGPT, trying drag-drop before paste');
-        if (tryDragDrop(inputEl, files)) { callback(true); return; }
-        if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
-      } else {
-        if (trySyntheticPaste(inputEl, files)) { callback(true); return; }
-        if (tryDragDrop(inputEl, files)) { callback(true); return; }
-      }
-
-      console.warn('[Portility] All file upload strategies failed');
-      callback(false);
+        console.warn('[Portility] All file upload strategies failed');
+        callback(false);
+      });
     } catch (err) {
       console.warn('[Portility] pasteImages failed:', err.message || err);
       callback(false);

@@ -1281,6 +1281,13 @@
   (function setupAutoPaste() {
     var pasting = false;
 
+    function findComposerInput() {
+      return document.querySelector('.ql-editor[contenteditable="true"]')
+        || document.querySelector('rich-textarea div[contenteditable="true"]')
+        || document.querySelector('div[contenteditable="true"]')
+        || document.querySelector('textarea');
+    }
+
     function doPaste(text) {
       if (pasting) return;
       pasting = true;
@@ -1289,10 +1296,7 @@
       }
       var attempts = 0;
       var interval = setInterval(function () {
-        var input = document.querySelector('.ql-editor[contenteditable="true"]')
-          || document.querySelector('rich-textarea div[contenteditable="true"]')
-          || document.querySelector('div[contenteditable="true"]')
-          || document.querySelector('textarea');
+        var input = findComposerInput();
         if (input) {
           clearInterval(interval);
           if (typeof window.portilityTrack === 'function') {
@@ -1352,17 +1356,44 @@
             // renders in the composer once the file is actually attached, and only
             // submit once we can confirm it (or give up after maxWaitMs so a missed
             // selector can't hang the send forever).
-            function waitForAttachmentThenSubmit(maxWaitMs) {
+            function waitForAttachmentThenSubmit(maxWaitMs, composerWrap) {
               var waited = 0;
               var checkInterval = setInterval(function () {
-                var preview = document.querySelector(
+                // Scope the search to the actual composer's own wrapper (not the
+                // whole document) — a global querySelector can match a second/
+                // orphan composer's preview chip elsewhere on the page, which
+                // previously produced a false "attached" signal.
+                var scope = composerWrap || document;
+                var preview = scope.querySelector(
                   'user-query-file-preview, user-query-file-carousel, ' +
                   '[class*="file-preview-container"], [class*="query-file-preview"], ' +
-                  '[class*="query-file-carousel"], [class*="uploader-file-preview"]'
+                  '[class*="query-file-carousel"], [class*="uploader-file-preview"], ' +
+                  '[class*="file-preview"], [class*="attachment-chip"], [class*="uploaded-file"]'
                 );
+                // The preview chip can render immediately on file selection, before
+                // the upload actually finishes — submitting while it's still
+                // mid-upload is what causes Gemini to drop the file into a fresh
+                // orphan composer once the upload completes after the message was
+                // already sent. Wait for any loading/progress indicator inside the
+                // chip to clear too.
+                var stillLoading = preview && preview.querySelector('[class*="loading"], [class*="spinner"], [class*="progress"], [role="progressbar"]');
                 waited += 200;
-                if (preview || waited >= maxWaitMs) {
+                if ((preview && !stillLoading) || waited >= maxWaitMs) {
                   clearInterval(checkInterval);
+                  if (preview && !stillLoading) {
+                    console.log('[Portility][Gemini] Attachment preview ready (scoped to composer):', preview.tagName, preview.className);
+                  } else if (preview) {
+                    console.warn('[Portility][Gemini] Attachment preview still loading after ' + waited + 'ms — submitting anyway.');
+                  } else {
+                    // Never saw a preview chip render in the composer before the
+                    // timeout — dump the composer's surrounding DOM so we can see
+                    // what actually happened to the file without another round of
+                    // manual DevTools screenshots.
+                    var composerNow = findComposerInput();
+                    var wrap = composerWrap || (composerNow && composerNow.closest ? composerNow.closest('form, [class*="input-area"], [class*="composer"]') : null);
+                    console.warn('[Portility][Gemini] No attachment preview in composer scope after ' + waited + 'ms — submitting anyway (file may not be attached). Composer area HTML:',
+                      wrap ? wrap.outerHTML.slice(0, 2000) : '(composer wrapper not found)');
+                  }
                   doAutoSubmit(300);
                 }
               }, 200);
@@ -1384,7 +1415,12 @@
               var otherFiles = images.filter(function (f) { return f.type && f.type !== 'image'; });
               console.log('[Portility][Gemini] Splitting:', imageFiles.length, 'image(s),', otherFiles.length, 'other file(s)');
 
-              var attachBtn = document.querySelector('button[aria-label="Upload file"]')
+              // Gemini's attach trigger is the "Upload & tools" button (renamed at
+              // some point from the older "Upload file"/"Add image" labels this
+              // code used to target — that mismatch meant we never actually
+              // opened the menu, so no <input type="file"> ever got mounted).
+              var attachBtn = document.querySelector('button[aria-label="Upload & tools"]')
+                || document.querySelector('button[aria-label="Upload file"]')
                 || document.querySelector('uploader-button button')
                 || document.querySelector('[aria-label="Add image"]');
               if (attachBtn) {
@@ -1396,19 +1432,39 @@
               setTimeout(function () {
                 var filesToPaste = imageFiles.length > 0 ? imageFiles : otherFiles;
                 var remainingFiles = imageFiles.length > 0 ? otherFiles : [];
+                // Re-query the composer instead of reusing the reference captured
+                // before text insertion — Gemini can swap in a fresh composer
+                // element when it transitions from the blank landing page to the
+                // live conversation view, leaving the old `input` detached (drop/
+                // paste events dispatched on it silently go nowhere but still
+                // report "handled", since nothing is listening to prevent them).
+                var liveInput = findComposerInput() || input;
 
-                window.PortilityShared.pasteImages(input, filesToPaste, function () {
+                // Clicking the attach button and Escape-closing its menu leaves
+                // document.activeElement on the button/body — a real user's file
+                // dialog instead returns focus to the page/composer on close.
+                // Gemini appears to use "is the main composer currently focused"
+                // to decide whether an uploaded file attaches inline vs. opens
+                // its standalone "ask about this file" panel, so restore focus
+                // to the composer before assigning the file.
+                liveInput.focus();
+
+                window.PortilityShared.pasteImages(liveInput, filesToPaste, function () {
                   if (remainingFiles.length > 0) {
                     // Paste remaining files after a short delay
                     setTimeout(function () {
-                      window.PortilityShared.pasteImages(input, remainingFiles, function () {
+                      var nextInput = findComposerInput() || liveInput;
+                      nextInput.focus();
+                      window.PortilityShared.pasteImages(nextInput, remainingFiles, function () {
                         chrome.storage.local.remove('portility_pending_images');
-                        waitForAttachmentThenSubmit(8000);
+                        var wrap = nextInput.closest ? nextInput.closest('form, [class*="input-area"], [class*="composer"]') : null;
+                        waitForAttachmentThenSubmit(12000, wrap);
                       });
                     }, 1000);
                   } else {
                     chrome.storage.local.remove('portility_pending_images');
-                    waitForAttachmentThenSubmit(8000);
+                    var liveWrap = liveInput.closest ? liveInput.closest('form, [class*="input-area"], [class*="composer"]') : null;
+                    waitForAttachmentThenSubmit(12000, liveWrap);
                   }
                 });
               }, 300);

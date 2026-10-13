@@ -147,6 +147,25 @@
   // ─── File attachment detection ──────────────────────────────────────────
 
   /**
+   * Map a filename's extension to a MIME type, for building data: URLs out of
+   * extracted text content. Shared by file-preview extraction and artifact
+   * content extraction.
+   * @param {string} filename
+   * @returns {string}
+   */
+  function getMimeTypeForFilename(filename) {
+    if (/\.html?$/i.test(filename)) return 'text/html';
+    if (/\.css$/i.test(filename)) return 'text/css';
+    if (/\.(js|ts|jsx|tsx)$/i.test(filename)) return 'application/javascript';
+    if (/\.json$/i.test(filename)) return 'application/json';
+    if (/\.md$/i.test(filename)) return 'text/markdown';
+    if (/\.xml$/i.test(filename)) return 'application/xml';
+    if (/\.csv$/i.test(filename)) return 'text/csv';
+    if (/\.py$/i.test(filename)) return 'text/x-python';
+    return 'text/plain';
+  }
+
+  /**
    * Extract file content by clicking the file card to open Claude's preview,
    * then scraping the content from the resulting DOM overlay. If Claude can't
    * render a text preview (e.g. Office docs, PDFs), fall back to looking for a
@@ -234,15 +253,7 @@
           }, 100);
 
           if (hasGenuineContent && textContent.length > 20) {
-            var mimeType = 'text/plain';
-            if (/\.html?$/i.test(filename)) mimeType = 'text/html';
-            else if (/\.css$/i.test(filename)) mimeType = 'text/css';
-            else if (/\.(js|ts|jsx|tsx)$/i.test(filename)) mimeType = 'application/javascript';
-            else if (/\.json$/i.test(filename)) mimeType = 'application/json';
-            else if (/\.md$/i.test(filename)) mimeType = 'text/markdown';
-            else if (/\.xml$/i.test(filename)) mimeType = 'application/xml';
-            else if (/\.csv$/i.test(filename)) mimeType = 'text/csv';
-            else if (/\.py$/i.test(filename)) mimeType = 'text/x-python';
+            var mimeType = getMimeTypeForFilename(filename);
             var dataUrl = 'data:' + mimeType + ';base64,' + btoa(unescape(encodeURIComponent(textContent)));
             console.log('[Portility] Extracted', textContent.length, 'chars from file preview');
             resolve({ dataUrl: dataUrl, downloadUrl: downloadUrl });
@@ -268,6 +279,84 @@
           document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
           console.log('[Portility] File preview did not appear after', attempts, 'checks');
           resolve({ dataUrl: null, downloadUrl: null });
+        }
+      }, 200);
+    });
+  }
+
+  /**
+   * Extract the text content of a Claude artifact.
+   *
+   * The artifact chip/reference found inside the conversation scope only
+   * carries a title — the actual rendered content lives in the artifact
+   * preview panel, which is a SIBLING of the conversation scope (excluded
+   * from `scope` per BUG-001) and typically only renders the currently-open
+   * artifact. Strategy: look for that panel outside `scope`; if it's not
+   * currently rendered, click the chip to open it and retry briefly.
+   * @param {Element} artEl - the artifact chip/reference element found in scope
+   * @param {Element} scope - conversation scope (used to exclude from panel search)
+   * @param {string} title
+   * @returns {Promise<string|null>}
+   */
+  function extractArtifactContent(artEl, scope, title) {
+    // Code/canvas artifacts render inside a container with "artifact" in its
+    // class or data-testid, but document-type artifacts (e.g. a Markdown
+    // resume opened from a "Document · MD" chip) instead render inside
+    // #wiggle-file-content (Claude's internal panel id for file/doc previews) —
+    // match both so extraction works for either artifact flavor.
+    var ARTIFACT_SELECTOR = '[class*="artifact"], [data-testid*="artifact"], [id*="wiggle-file"]';
+
+    function findPanelText() {
+      var candidates = Array.from(document.querySelectorAll(ARTIFACT_SELECTOR))
+        .filter(function (el) { return !scope.contains(el) && isElementVisible(el); });
+      // Outermost only
+      candidates = candidates.filter(function (el) {
+        return !el.parentElement || !el.parentElement.closest(ARTIFACT_SELECTOR);
+      });
+      if (candidates.length === 0) return null;
+
+      // Prefer a panel whose own title/aria-label matches this artifact's title;
+      // fall back to the most recently rendered candidate.
+      var panel = candidates.find(function (el) {
+        var t = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+        return t && title && t.indexOf(title) >= 0;
+      }) || candidates[candidates.length - 1];
+
+      var contentEl = panel.querySelector('pre') || panel.querySelector('code') ||
+                       panel.querySelector('[class*="content"]') || panel.querySelector('iframe');
+
+      var text = '';
+      if (contentEl && contentEl.tagName === 'IFRAME') {
+        try { text = contentEl.contentDocument.body.textContent || ''; } catch (e) { /* cross-origin */ }
+      } else if (contentEl) {
+        text = contentEl.textContent || contentEl.innerText || '';
+      } else {
+        text = panel.textContent || panel.innerText || '';
+      }
+      return text && text.trim().length > 20 ? text : null;
+    }
+
+    return new Promise(function (resolve) {
+      var existing = findPanelText();
+      if (existing) {
+        console.log('[Portility] Artifact panel already open, extracted', existing.length, 'chars');
+        resolve(existing);
+        return;
+      }
+
+      // Panel isn't currently rendered — click the chip to open it, then retry.
+      var clickTarget = artEl.querySelector('button') || artEl;
+      clickTarget.click();
+      console.log('[Portility] Clicked artifact chip, waiting for panel...');
+
+      var attempts = 0;
+      var iv = setInterval(function () {
+        attempts++;
+        var text = findPanelText();
+        if (text || attempts > 15) { // 3 seconds max
+          clearInterval(iv);
+          if (!text) console.log('[Portility] Artifact panel did not render content after', attempts, 'checks');
+          resolve(text);
         }
       }, 200);
     });
@@ -640,14 +729,36 @@
             }
             if (!artTitle || seenArtifactTitles[artTitle]) continue;
             seenArtifactTitles[artTitle] = true;
+
+            // The chip usually shows a format label near the title (e.g. "Document · MD").
+            // If the title itself has no extension, pull one from that label so the
+            // extracted content gets a correct MIME type and destination filename.
+            var artFilenameBase = artTitle.replace(/[^a-zA-Z0-9_.\- ]/g, '_').substring(0, 80);
+            if (!/\.\w{1,5}$/.test(artFilenameBase)) {
+              var badgeText = (artEl.textContent || '').replace(artTitle, '');
+              var extMatch = badgeText.match(/\b(MD|HTML?|CSS|JSX?|TSX?|JSON|XML|CSV|PY|SVG|TXT|YAML|YML|SQL)\b/i);
+              if (extMatch) artFilenameBase += '.' + extMatch[1].toLowerCase();
+            }
+
+            var artContent = await extractArtifactContent(artEl, scope, artTitle);
+            var artDataUrl = null;
+            if (artContent) {
+              var artMime = getMimeTypeForFilename(artFilenameBase);
+              artDataUrl = 'data:' + artMime + ';base64,' + btoa(unescape(encodeURIComponent(artContent)));
+              console.log('[Portility] Extracted', artContent.length, 'chars from artifact:', artTitle);
+            } else {
+              console.log('[Portility] Could not extract content for artifact:', artTitle);
+            }
+
             allAssets.push({
               type: 'artifact',
               url: null,
               alt: artTitle,
               thumbnailUrl: null,
-              filename: artTitle.replace(/[^a-zA-Z0-9_.\- ]/g, '_').substring(0, 80),
+              filename: artFilenameBase,
               turnIndex: -1,
               role: 'Assistant',
+              dataUrl: artDataUrl,
             });
           }
 

@@ -1255,13 +1255,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // No profiles — go to type selection to create first one
         crumb('instr_no_profiles');
         showProfileScreen('profileTypeScreen');
-      } else if (profiles.length === 1) {
-        // Single profile — port directly
-        crumb('instr_single_profile');
-        trackEvent('portme_pro_profile_selected', { profileId: profiles[0].id, profileType: profiles[0].type });
-        await portWithProfile(profiles[0], auth);
       } else {
-        // Multiple profiles — show picker
+        // One or more profiles — show picker (list of existing profiles + "New Profile")
         crumb('instr_picker');
         renderProfilePicker(profiles);
         showProfileScreen('profilePicker');
@@ -2178,6 +2173,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function showScreen(id) {
     screen1.style.display = id === 'screen1' ? 'block' : 'none';
     screen2.style.display = id === 'screen2' ? 'block' : 'none';
+    // Second Opinion results panel isn't part of the screen1/screen2 pair,
+    // but it's mutually exclusive with both — always hide it here so a
+    // cached SO result left visible from a race (e.g. the floating-widget
+    // hand-off in portility_pending_tool_action) can't stack underneath.
+    if (soResultsEl) soResultsEl.style.display = 'none';
     // Also exit any profile screen
     exitProfileScreens();
   }
@@ -2500,7 +2500,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Summary mode: show captured images for selection, enriched with AI reasons
           if (capturedImageCount > 0 && allCapturedImages && allCapturedImages.length > 0) {
-            var imageAssets = mergedAssets.filter(function(a) { return a.type === 'image' || a.type === 'file'; });
+            var imageAssets = mergedAssets.filter(function(a) { return a.type === 'image' || a.type === 'file' || a.type === 'artifact'; });
             setScreen2Status('Select files to include\u2026');
             var summarySelected = await showImageSelection(allCapturedImages, imageAssets);
             images = summarySelected.map(function(i) { return allCapturedImages[i]; });
@@ -2608,7 +2608,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // For AI destinations: text brief + auto-paste images via content script
           var clipContent = buildDownloadContent(_proData, false);
           var selectedImages = (_proData.assets || []).filter(function (a) {
-            return a.selected && (a.type === 'image' || a.type === 'file') && a.dataUrl;
+            return a.selected && (a.type === 'image' || a.type === 'file' || a.type === 'artifact') && a.dataUrl;
           });
 
           await writeClipboard(clipContent);
@@ -2905,7 +2905,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // extract content for (dataUrl: null) are shown, disabled, with a reason
     // explaining they need to be downloaded manually.
     var realImages = capturedImages.filter(function(ci) {
-      if (ci.type === 'file') return true;
+      if (ci.type === 'file' || ci.type === 'artifact') return true;
       if (!ci.dataUrl) return false;
       return ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH;
     });
@@ -2917,7 +2917,7 @@ document.addEventListener('DOMContentLoaded', () => {
     var originalIndices = [];
     for (var oi = 0; oi < capturedImages.length; oi++) {
       var ci = capturedImages[oi];
-      if (ci.type === 'file') { originalIndices.push(oi); continue; }
+      if (ci.type === 'file' || ci.type === 'artifact') { originalIndices.push(oi); continue; }
       if (!ci.dataUrl) continue;
       if (ci.dataUrl.length >= MIN_IMAGE_DATA_LENGTH) {
         originalIndices.push(oi);
@@ -2960,7 +2960,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      var isUnextracted = ci.type === 'file' && !ci.dataUrl;
+      var isUnextracted = (ci.type === 'file' || ci.type === 'artifact') && !ci.dataUrl;
       var isSuperseded = supersededIndices.has(originalIndices[i]);
 
       // Pre-select if AI flagged it, or if no AI data available (full-text mode).
@@ -2976,7 +2976,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Asset description cell with thumbnail or file icon
       var tdAsset = document.createElement('td');
-      var isFile = ci.type === 'file';
+      var isFile = ci.type === 'file' || ci.type === 'artifact';
       if (isFile) {
         var fileIcon = document.createElement('span');
         fileIcon.className = 'pro-asset-thumb pro-asset-file-icon';
@@ -3776,6 +3776,7 @@ document.addEventListener('DOMContentLoaded', () => {
     soResultsEl.classList.remove('so-loading');
     setStatus('');
     screen1.style.display = 'none';
+    screen2.style.display = 'none';
     soResultsEl.style.display = 'block';
 
     // Cache results for 5-minute persistence (with tab URL for navigation invalidation)
@@ -3919,6 +3920,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Show the results screen
     screen1.style.display = 'none';
+    screen2.style.display = 'none';
     soResultsEl.style.display = 'block';
     expandPopup();
   }
