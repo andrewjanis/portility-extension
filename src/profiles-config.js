@@ -147,7 +147,7 @@ var PROFILE_QUESTIONNAIRE_CONFIG = {
             key: 'workRole',
             title: 'Describe your role or industry',
             type: 'textarea',
-            placeholder: 'e.g. "Software engineer at a fintech startup" or "Marketing manager in healthcare"',
+            placeholder: 'e.g. "Software engineer at a fintech startup" or copy and paste your resume for better context',
             instructionPrefix: 'My role/industry: ',
           },
           {

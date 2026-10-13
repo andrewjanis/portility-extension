@@ -1464,8 +1464,11 @@ function handleConfig(corsHeaders) {
       },
 
       chatgpt: {
-        humanSelector: '[data-message-author-role="user"]',
-        aiSelector: '[data-message-author-role="assistant"]',
+        // ChatGPT's Sep 2026 "search-unit" layout dropped data-message-author-role
+        // for a `...:user` / `...:assistant` suffix on a different attribute (which
+        // itself was renamed once already). Match all known generations.
+        humanSelector: '[data-message-author-role="user"], [data-content-search-unit-key$=":user"], [data-chatgpt-search-unit-key$=":user"]',
+        aiSelector: '[data-message-author-role="assistant"], [data-content-search-unit-key$=":assistant"], [data-chatgpt-search-unit-key$=":assistant"]',
         inputSelectors: [
           '#prompt-textarea',
           'div[contenteditable="true"]',

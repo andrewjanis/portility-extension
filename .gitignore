@@ -3,3 +3,4 @@ release/
 portility-v1.3.1-summary.md
 .claude/settings.local.json
 worker/.wrangler/
+.claude/qa/chrome-profile/

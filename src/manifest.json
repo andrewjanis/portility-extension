@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Portility",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "Portility is the usability layer above today's AI platforms, making it easy to move conversations and context anywhere.",
   "permissions": [
     "activeTab",
