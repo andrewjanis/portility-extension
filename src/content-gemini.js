@@ -1186,11 +1186,13 @@
 
           var allAssets = [];
           for (var i = 0; i < tagged.length; i++) {
+            var promptText = window.PortilityShared.getPrecedingHumanText(tagged, i);
             var turnAssets = window.PortilityShared.extractAssets(
-              tagged[i].el, tagged[i].role, i
+              tagged[i].el, tagged[i].role, i, promptText
             );
             allAssets = allAssets.concat(turnAssets);
           }
+          window.PortilityShared.applyFilenameVersioning(allAssets);
 
           // Detect Gemini-specific file attachments (uploaded files as chips)
           var geminiFiles = await detectGeminiFileAttachments(scope, allAssets);

@@ -230,6 +230,28 @@ async function launchGDriveAuthFlowBg() {
 }
 
 // ─── Download/tab interception helpers ────────────────────────────────────────
+
+// Tracks how many INTERCEPT_DOWNLOAD watches are currently active. While > 0,
+// any download Chrome creates (the one we're about to capture-and-cancel below
+// — triggered by programmatically clicking the source platform's own download
+// control, e.g. a Gemini file-citation "Download" button, as part of silently
+// extracting its content for a port) gets a filename suggested here. If the
+// user has Chrome's "Ask where to save each file before downloading" setting
+// on, Chrome would otherwise pop the native Save As dialog for every one of
+// these internal downloads that's never actually meant to reach disk — calling
+// suggest() from an onDeterminingFilename listener pre-empts that prompt for
+// this download. Scoped to the active watch window so it never affects
+// downloads the user initiates themselves elsewhere in the browser.
+var activeDownloadIntercepts = 0;
+
+chrome.downloads.onDeterminingFilename.addListener(function (item, suggest) {
+  if (activeDownloadIntercepts > 0) {
+    suggest({ filename: item.filename, conflictAction: 'uniquify' });
+  }
+  // Not intercepting: don't call suggest() — let the user's own download
+  // settings (including "ask where to save") apply normally.
+});
+
 function fetchAndCloseTab(tabId, url, sendResponse) {
   console.log('[BG] Fetching from tab URL:', url.substring(0, 150));
   // Close the tab first
@@ -996,7 +1018,20 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   // fetch the content as data URL, and return it to the content script.
   if (message.type === 'INTERCEPT_DOWNLOAD') {
     console.log('[BG] INTERCEPT_DOWNLOAD: watching for downloads...');
+    activeDownloadIntercepts++;
+    var dlDone = false;
     var dlWatchTimeout = null;
+
+    // onDeterminingFilename fires shortly after onCreated for the same
+    // download, so keep suppressing "ask where to save" for a moment after
+    // we've captured and cancelled it, rather than flipping the counter off
+    // immediately inside dlListener (which would race it).
+    function stopIntercepting() {
+      if (dlDone) return;
+      dlDone = true;
+      setTimeout(function () { activeDownloadIntercepts--; }, 2000);
+    }
+
     var dlListener = function (downloadItem) {
       chrome.downloads.onCreated.removeListener(dlListener);
       clearTimeout(dlWatchTimeout);
@@ -1010,6 +1045,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
       chrome.downloads.cancel(downloadId, function () {
         chrome.downloads.erase({ id: downloadId });
       });
+      stopIntercepting();
 
       // Fetch the content from the download URL
       (async function () {
@@ -1034,6 +1070,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     // Timeout after 15 seconds
     dlWatchTimeout = setTimeout(function () {
       chrome.downloads.onCreated.removeListener(dlListener);
+      stopIntercepting();
       console.log('[BG] INTERCEPT_DOWNLOAD timeout');
       sendResponse({ error: 'timeout' });
     }, 15000);

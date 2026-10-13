@@ -484,11 +484,13 @@
 
           var allAssets = [];
           for (var i = 0; i < tagged.length; i++) {
+            var promptText = window.PortilityShared.getPrecedingHumanText(tagged, i);
             var turnAssets = window.PortilityShared.extractAssets(
-              tagged[i].el, tagged[i].role, i
+              tagged[i].el, tagged[i].role, i, promptText
             );
             allAssets = allAssets.concat(turnAssets);
           }
+          window.PortilityShared.applyFilenameVersioning(allAssets);
           console.log('[Portility] DOM extraction found', allAssets.length, 'asset(s):', allAssets.map(function (a) {
             return { type: a.type, role: a.role, filename: a.filename, url: (a.url || '').substring(0, 80), hasDataUrl: !!a.dataUrl };
           }));

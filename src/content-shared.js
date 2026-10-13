@@ -175,14 +175,102 @@
     }
   }
 
+  // ─── Descriptive image filenames ──────────────────────────────────────────
+  // Platform image URLs/alt text are rarely useful filenames (e.g. Gemini's
+  // own "Gemini_Generated_Image_<random-hash>.jpg"). When the nearby prompt
+  // text is available, build something readable instead, e.g.
+  // "Gemini_generated_10_11_26_chicken_beer.jpg".
+  var FILENAME_STOPWORDS = {
+    a: 1, an: 1, the: 1, of: 1, in: 1, on: 1, to: 1, for: 1, with: 1, and: 1,
+    or: 1, my: 1, me: 1, i: 1, you: 1, your: 1, please: 1, can: 1, could: 1,
+    would: 1, will: 1, make: 1, made: 1, create: 1, draw: 1, drawing: 1,
+    generate: 1, generated: 1, generating: 1, image: 1, images: 1, picture: 1,
+    photo: 1, show: 1, give: 1, want: 1, like: 1, this: 1, that: 1, these: 1,
+    those: 1, is: 1, are: 1, was: 1, were: 1, be: 1, it: 1, its: 1, as: 1,
+    at: 1, by: 1, from: 1, into: 1, onto: 1, up: 1, down: 1, out: 1,
+    about: 1, if: 1, then: 1, so: 1, just: 1, some: 1, any: 1, using: 1,
+    use: 1, new: 1, here: 1, there: 1, now: 1, also: 1, really: 1, very: 1,
+    // Platform accessibility-echo prefixes (e.g. Gemini's hidden "You said ..."
+    // / "Gemini said ..." label ahead of the real prompt text) — not stripped
+    // by extractElementText today, so filtered here to keep them out of slugs.
+    said: 1, asked: 1, wrote: 1, typed: 1, gemini: 1, chatgpt: 1, claude: 1,
+  };
+
+  /**
+   * Pull a handful of significant words out of prompt/caption text, for use
+   * as a filename slug. Returns '' if nothing usable is found.
+   * @param {string} text
+   * @param {number} maxWords
+   * @returns {string}
+   */
+  function slugFromPrompt(text, maxWords) {
+    if (!text) return '';
+    var words = text.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(function (w) { return w.length >= 3 && !FILENAME_STOPWORDS[w]; });
+    var slug = words.slice(0, maxWords || 4).join('_');
+    return slug.substring(0, 40);
+  }
+
+  /** @returns {string} today's date as MM_DD_YY, matching the user-facing filename style. */
+  function dateSlug() {
+    var d = new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return pad(d.getMonth() + 1) + '_' + pad(d.getDate()) + '_' + String(d.getFullYear()).slice(-2);
+  }
+
+  /** @returns {string} 'Claude' | 'ChatGPT' | 'Gemini' | 'Portility', based on the current page. */
+  function detectPlatformLabel() {
+    if (/claude\.ai/i.test(location.hostname)) return 'Claude';
+    if (/chatgpt\.com|chat\.openai\.com/i.test(location.hostname)) return 'ChatGPT';
+    if (/gemini\.google\.com/i.test(location.hostname)) return 'Gemini';
+    return 'Portility';
+  }
+
+  /**
+   * Build a descriptive filename like "Gemini_generated_10_11_26_chicken_beer.jpg"
+   * from nearby prompt text, or return null if there's no usable text (caller
+   * should fall back to the platform's own filename/URL in that case).
+   * @param {string} promptText - text of the turn that prompted this image
+   * @param {string} role - 'Human' or 'Assistant' (Assistant = AI-generated)
+   * @param {string} ext - file extension including the dot, e.g. '.jpg'
+   * @returns {string|null}
+   */
+  function buildDescriptiveFilename(promptText, role, ext) {
+    var slug = slugFromPrompt(promptText, 4);
+    if (!slug) return null;
+    var origin = role === 'Assistant' ? 'generated' : 'image';
+    return detectPlatformLabel() + '_' + origin + '_' + dateSlug() + '_' + slug + (ext || '.png');
+  }
+
+  /**
+   * Find the text of the nearest preceding Human turn in a sorted, tagged
+   * turn list — used as the "prompt" for an image that appears later in the
+   * same list (e.g. an AI-generated image in the following Assistant turn).
+   * @param {{el: Element, role: string}[]} tagged - turns sorted in DOM order
+   * @param {number} index - index of the turn whose preceding prompt we want
+   * @returns {string}
+   */
+  function getPrecedingHumanText(tagged, index) {
+    if (tagged[index] && tagged[index].role === 'Human') {
+      return extractElementText(tagged[index].el);
+    }
+    for (var j = index - 1; j >= 0; j--) {
+      if (tagged[j].role === 'Human') return extractElementText(tagged[j].el);
+    }
+    return '';
+  }
+
   /**
    * Extract asset metadata (images, file links) from a message element.
    * @param {Element} el - The message element to scan
    * @param {string} role - 'Human' or 'Assistant'
    * @param {number} turnIndex - Position in conversation
+   * @param {string} [promptText] - nearby prompt text, for descriptive filenames
    * @returns {{ type: string, url: string|null, alt: string, thumbnailUrl: string|null, filename: string|null, turnIndex: number, role: string }[]}
    */
-  function extractAssets(el, role, turnIndex) {
+  function extractAssets(el, role, turnIndex, promptText) {
     var assets = [];
     var seenSrcs = {};
 
@@ -197,12 +285,25 @@
       if (seenSrcs[src]) return;
       seenSrcs[src] = true;
 
+      var fallbackName = extractFilenameFromUrl(src) || ('image_' + turnIndex + '_' + idx + '.png');
+      var ext = (fallbackName.match(/\.[a-z0-9]+$/i) || ['.png'])[0];
+      var descriptiveBase = null;
+      var filename = fallbackName;
+      var descriptive = buildDescriptiveFilename(promptText, role, ext);
+      if (descriptive) {
+        filename = descriptive;
+        // Base (sans extension) used later to version R1/R2/... if the same
+        // prompt produces more than one image (user regenerates/iterates).
+        descriptiveBase = descriptive.slice(0, -ext.length);
+      }
+
       assets.push({
         type: 'image',
         url: src,
         alt: img.alt || '',
         thumbnailUrl: src,
-        filename: extractFilenameFromUrl(src) || ('image_' + turnIndex + '_' + idx + '.png'),
+        filename: filename,
+        _descriptiveBase: descriptiveBase,
         turnIndex: turnIndex,
         role: role,
       });
@@ -283,6 +384,39 @@
       }
     }
 
+    return assets;
+  }
+
+  /**
+   * Version descriptively-named images that share the same prompt-derived
+   * base filename — e.g. the user regenerates/iterates on the same prompt
+   * and ends up with multiple images that would otherwise collide as
+   * "Gemini_generated_10_11_26_chicken_beer.jpg". Call once on the full,
+   * ordered asset list for a conversation (after collecting every turn's
+   * assets), not per-turn, since regenerated images can land in different
+   * turns. Mutates and returns the given array.
+   * @param {Array<Object>} assets
+   * @returns {Array<Object>}
+   */
+  function applyFilenameVersioning(assets) {
+    var groups = {};
+    var order = [];
+    for (var i = 0; i < assets.length; i++) {
+      var base = assets[i]._descriptiveBase;
+      if (!base) continue;
+      if (!groups[base]) { groups[base] = []; order.push(base); }
+      groups[base].push(assets[i]);
+    }
+    for (var o = 0; o < order.length; o++) {
+      var group = groups[order[o]];
+      if (group.length < 2) continue;
+      for (var g = 0; g < group.length; g++) {
+        var asset = group[g];
+        var ext = (asset.filename.match(/\.[a-z0-9]+$/i) || [''])[0];
+        asset.filename = order[o] + '_R' + (g + 1) + ext;
+      }
+    }
+    for (var j = 0; j < assets.length; j++) delete assets[j]._descriptiveBase;
     return assets;
   }
 
@@ -727,6 +861,8 @@
     copyToClipboard: copyToClipboard,
     formatConversation: formatConversation,
     extractAssets: extractAssets,
+    applyFilenameVersioning: applyFilenameVersioning,
+    getPrecedingHumanText: getPrecedingHumanText,
     captureImageData: captureImageData,
     pasteImages: pasteImages,
     fetchWithCookies: fetchWithCookies,
